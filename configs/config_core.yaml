@@ -1,0 +1,63 @@
+# CXR Agent Configuration — Core tools only (CheXagent-2 + CheXOne)
+# Use this when only core servers are running (no MedVersa, BiomedParse, etc.)
+
+agent:
+  model: "claude-sonnet-4-6"
+  max_iterations: 10
+  max_tokens: 4096
+  temperature: 0.0
+  reasoning_effort: "medium"
+
+clear:
+  model_path: "../cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt"
+  concepts_path: "../cxr_concept/CheXzero/concepts/mimic_concepts.csv"
+  dinov2_model_name: "dinov2_vitb14"
+  image_resolution: 448
+  top_k: 20
+
+tools:
+  chexagent2:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexagent2_srrg:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexone:
+    enabled: true
+    endpoint: "http://localhost:8002"
+  chexagent2_classify:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexagent2_grounding:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexagent2_vqa:
+    enabled: true
+    endpoint: "http://localhost:8001"
+
+  # Disabled — servers not running
+  medversa:
+    enabled: false
+  medversa_classify:
+    enabled: false
+  medversa_detect:
+    enabled: false
+  medversa_segment:
+    enabled: false
+  medversa_vqa:
+    enabled: false
+  biomedparse:
+    enabled: false
+  medsam3:
+    enabled: false
+  factchexcker:
+    enabled: false
+
+skill:
+  enabled: false
+  path: null
+
+logging:
+  level: "INFO"
+  save_trajectories: true
+  trajectory_dir: "trajectories/"

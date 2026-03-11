@@ -10,8 +10,8 @@ agent:
 
 # CLEAR concept prior settings
 clear:
-  model_path: null  # null = auto-detect from ../cxr_concept/checkpoints/
-  concepts_path: null  # null = auto-detect from ../cxr_concept/concepts/
+  model_path: "../cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt"
+  concepts_path: "../cxr_concept/CheXzero/concepts/mimic_concepts.csv"
   dinov2_model_name: "dinov2_vitb14"
   image_resolution: 448
   top_k: 20  # number of top concepts to include in prior

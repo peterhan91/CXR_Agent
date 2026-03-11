@@ -432,6 +432,125 @@ def run_agent_eval(args):
         print(f"Errors: {errors}")
 
 
+# ─── Sonnet API Only (no tools) ──────────────────────────────────────────────
+
+
+def run_sonnet_only(args):
+    """Generate reports using Claude Sonnet API directly (no tools, no CLEAR).
+
+    Sends each CXR image to Claude Sonnet with a simple prompt asking for
+    a radiology report. This baseline isolates Claude's vision capability
+    from the agent's tool orchestration and concept priors.
+    """
+    import base64
+    import mimetypes
+    import anthropic
+    from tenacity import retry, stop_after_attempt, wait_random_exponential
+
+    output_dir = Path(args.output)
+    test_set = _load_test_set(output_dir)
+
+    predictions_path = output_dir / "predictions_sonnet.json"
+    existing = _load_existing_predictions(predictions_path)
+    predictions = list(existing.values())
+
+    client = anthropic.Anthropic()
+    model = getattr(args, "sonnet_model", "claude-sonnet-4-6")
+
+    total = len(test_set)
+    cum_in = sum(p.get("input_tokens", 0) for p in predictions)
+    cum_out = sum(p.get("output_tokens", 0) for p in predictions)
+    errors = 0
+    t_start = time.time()
+
+    @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(10))
+    def _call(**kwargs):
+        return client.messages.create(**kwargs)
+
+    for i, entry in enumerate(test_set):
+        study_id = entry["study_id"]
+        if study_id in existing:
+            continue
+
+        logger.info(f"[{i+1}/{total}] Sonnet: study {study_id}")
+        t0 = time.time()
+
+        try:
+            image_path = entry["image_path"]
+            mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
+            if mime_type not in {"image/jpeg", "image/png", "image/gif", "image/webp"}:
+                mime_type = "image/png"
+            with open(image_path, "rb") as f:
+                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+            response = _call(
+                model=model,
+                max_tokens=2048,
+                temperature=0.0,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime_type,
+                                "data": image_data,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": (
+                                "You are an expert radiologist. Please analyze this chest X-ray "
+                                "and generate a comprehensive radiology report with FINDINGS and "
+                                "IMPRESSION sections. Be specific about any abnormalities observed."
+                            ),
+                        },
+                    ],
+                }],
+            )
+
+            text_blocks = [b for b in response.content if b.type == "text"]
+            report = "\n".join(b.text for b in text_blocks)
+            in_tok = response.usage.input_tokens
+            out_tok = response.usage.output_tokens
+        except Exception as e:
+            logger.error(f"Sonnet failed for {study_id}: {e}", exc_info=True)
+            report = ""
+            in_tok = out_tok = 0
+            errors += 1
+
+        wall_ms = (time.time() - t0) * 1000
+        cum_in += in_tok
+        cum_out += out_tok
+
+        pred = {
+            "study_id": study_id,
+            "report_pred": report,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "wall_time_ms": wall_ms,
+        }
+        predictions.append(pred)
+        existing[study_id] = pred
+
+        if len(predictions) % 5 == 0:
+            _save_predictions(predictions_path, predictions)
+            done = len(predictions)
+            elapsed = time.time() - t_start
+            logger.info(
+                f"[{done}/{total}] saved | "
+                f"tokens: {cum_in:,} in / {cum_out:,} out | "
+                f"{elapsed/60:.1f}min elapsed"
+            )
+
+    _save_predictions(predictions_path, predictions)
+    print(f"\nSonnet: {len(predictions)} predictions -> {predictions_path}")
+    print(f"Total tokens: {cum_in:,} input, {cum_out:,} output")
+    if errors:
+        print(f"Errors: {errors}")
+
+
 # ─── Scoring ─────────────────────────────────────────────────────────────────
 
 
@@ -747,8 +866,8 @@ Examples:
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["prepare", "chexone", "agent", "score", "compare"],
-        help="prepare: build test set | chexone: baseline | agent: full pipeline | score: compute metrics | compare: print table",
+        choices=["prepare", "chexone", "agent", "sonnet", "score", "compare"],
+        help="prepare: build test set | chexone: baseline | sonnet: API-only baseline | agent: full pipeline | score: compute metrics | compare: print table",
     )
     parser.add_argument(
         "--output",
@@ -793,6 +912,7 @@ Examples:
     dispatch = {
         "prepare": prepare_test_set,
         "chexone": run_chexone,
+        "sonnet": run_sonnet_only,
         "agent": run_agent_eval,
         "score": score_predictions,
         "compare": compare_results,

@@ -373,15 +373,18 @@ class CXRReActAgent:
                 },
             })
 
-        # Add the task instruction
+        # Add the task instruction — include the filesystem path so the agent
+        # can pass it to tools (tools need the path, not the base64 image)
         content.append({
             "type": "text",
             "text": (
-                "Please analyze this chest X-ray and generate a comprehensive radiology report. "
-                "Use the available tools to gather information from specialized CXR models, "
-                "then synthesize your findings into a final report with FINDINGS and IMPRESSION sections.\n\n"
-                "When you have gathered sufficient information from the tools, stop calling tools "
-                "and provide your final synthesized report directly."
+                f"Please analyze this chest X-ray and generate a comprehensive radiology report. "
+                f"The image file path is: {image_path}\n\n"
+                f"Use the available tools to gather information from specialized CXR models. "
+                f"When calling tools, pass image_path=\"{image_path}\" exactly as shown.\n\n"
+                f"Synthesize your findings into a final report with FINDINGS and IMPRESSION sections. "
+                f"When you have gathered sufficient information from the tools, stop calling tools "
+                f"and provide your final synthesized report directly."
             ),
         })
 
