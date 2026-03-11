@@ -1,73 +1,105 @@
 ---
 name: grounded_report
-version: "3.0"
-description: Grounded CXR report generation using ALL 9 tools for maximum accuracy
+version: "4.0"
+description: MIMIC-style CXR report generation optimized for RadCliQ-v1/RadGraph-F1/BLEU-2
 ---
 
-# Grounded Report Generation Workflow
+# Workflow: Generate MIMIC-CXR Report
 
-You have 9 tools. Use ALL of them — more tools = more accurate reports = higher scores.
-Do NOT use any MedVersa tools (medversa_*) or MedSAM tools — they are disabled.
+Execute these phases IN ORDER. Do not skip any mandatory step.
 
-## Phase 1: Gather Findings (3 tool calls — MANDATORY)
-1. Call `chexagent2_report` — free-text report.
-2. Call `chexone_report` — second opinion from a different model.
-3. Call `chexagent2_srrg_report` — structured region-by-region findings (Lungs, Pleura, Cardiovascular, Other).
+## Phase 1: Collect Reports (3 calls — MANDATORY)
+Call all three report generators. Each provides a different clinical perspective.
+1. `chexagent2_report` — free-text report
+2. `chexone_report` — second-opinion report
+3. `chexagent2_srrg_report` — structured region-by-region report
 
-## Phase 2: Screen and Classify (2-4 tool calls — MANDATORY)
-4. Call `chexzero_classify` — zero-shot screening of all 14 CheXpert pathologies at once. P>0.5 = positive. Best for cardiomegaly, edema, pleural effusion.
-5. Call `chexagent2_classify` with `task=binary_disease` for EACH finding flagged by Phase 1 reports OR chexzero (e.g., disease_name="cardiomegaly").
-6. If CheXagent-2 and CheXOne disagree, resolve with `chexagent2_vqa` (e.g., "Is there evidence of pleural effusion in this chest X-ray?").
-7. Only include findings confirmed by at least one classifier. Drop anything both classifiers reject.
+## Phase 2: Screen All Pathologies (1 call — MANDATORY)
+4. `chexzero_classify` — zero-shot 14-label screening. Any label with P > 0.5 is positive. Record ALL positive and negative labels.
 
-## Phase 3: Ground with Bounding Boxes (1-3 tool calls)
-For each CONFIRMED abnormal finding:
-8. Call `chexagent2_grounding` with `task=phrase_grounding` and `phrase="<finding>"` (e.g., "cardiomegaly", "right pleural effusion", "left basilar opacity").
+## Phase 3: Confirm Suspected Findings (1-3 calls)
+For each finding flagged positive by Phase 1 reports OR Phase 2 screening:
+5. `chexagent2_classify` with `task="binary_disease"`, `disease_name="<finding>"` — binary confirmation.
+6. If Phase 1 reports disagree on a finding, call `chexagent2_vqa` with a direct yes/no question (e.g., "Is there a pleural effusion?").
 
-## Phase 4: Segment Diffuse Findings (1-2 tool calls)
-For diffuse/regional findings (effusions, opacities, consolidation, atelectasis):
-9. Call `biomedparse_segment` with `prompts=["<finding>"]` to get segmentation coverage and bbox.
-   - Good prompts: "lung opacity", "left lung", "right lung", "pleural effusion", "viral pneumonia".
-   - Returns: coverage_pct (extent of finding), bbox (bounding region), mask_shape.
-10. Use segmentation coverage to VALIDATE findings — 0% coverage = likely absent; >40% = diffuse.
+Decision rule:
+- INCLUDE a finding only if at least one classifier (chexzero OR chexagent2_classify) confirms it.
+- EXCLUDE if both classifiers say no, even if a report mentions it.
 
-## Phase 5: Verify Report (1 tool call — MANDATORY)
-11. ALWAYS call `factchexcker_verify` with your draft report text before finalizing.
-    - It checks for hallucinations, measurement errors, and factual inconsistencies.
-    - If changes_made is true, incorporate corrections.
+## Phase 4: Ground Confirmed Findings (1-3 calls)
+For each confirmed abnormal finding:
+7. `chexagent2_grounding` with `task="phrase_grounding"`, `phrase="<finding>"` — bounding box for focal findings (cardiomegaly, nodule, device).
+8. `biomedparse_segment` with `prompts=["<finding>"]` — segmentation for diffuse findings (effusion, opacity, consolidation, atelectasis). Use coverage_pct to validate extent.
+
+## Phase 5: Verify (1 call — MANDATORY)
+9. `factchexcker_verify` with your draft report text. If it flags errors, fix them.
 
 ## Phase 6: Write Final Report
-12. Synthesize a concise report in MIMIC-CXR style following all format rules.
-13. For GROUNDINGS, include BOTH bbox and segmentation data:
-    - Use bbox from chexagent2_grounding for focal findings.
-    - Use bbox from biomedparse_segment for diffuse findings.
-    - Include coverage_pct when available.
 
-## Tool Call Target: 8-12 calls per study
-Minimum workflow: 3 reports + 1 chexzero screen + 1-2 classify + 1-2 grounding + 1 factcheck = 8-10 calls.
-Add biomedparse_segment and chexagent2_vqa as needed for 10-12 calls.
+### CRITICAL — Match MIMIC-CXR Report Style Exactly
 
-## Report Format Rules
-- Write plain text. NO markdown (no ##, **, -, ---, bullets, headers).
-- FINDINGS: one concise paragraph, 35-55 words.
-- IMPRESSION: exactly 1 sentence synthesizing the key finding.
-- Total (FINDINGS + IMPRESSION): 50-75 words combined.
-- Use standard radiology phrasing: "There is...", "No evidence of...", "The cardiac silhouette is...".
-- Do NOT mention tool names, model names, concept priors, or reasoning in report text.
-- Do NOT discuss model agreement/disagreement.
-- ALWAYS verify positive findings with classification before including.
-- Include relevant negative findings when confirmed.
-- Do NOT reference prior studies or interval change.
+Study these real MIMIC-CXR examples and match their tone, structure, and phrasing:
 
-## Grounding Format
+**Example 1 (normal):**
+> FINDINGS:
+> PA and lateral views of the chest. There is no focal consolidation, pleural effusion or pneumothorax. The cardiomediastinal and hilar contours are normal.
+>
+> IMPRESSION:
+> No acute cardiopulmonary process.
+
+**Example 2 (normal):**
+> FINDINGS:
+> Lungs are clear. There is no effusion or consolidation. Cardiomediastinal silhouette is normal. No acute osseous abnormalities identified.
+>
+> IMPRESSION:
+> No acute cardiopulmonary process.
+
+**Example 3 (abnormal):**
+> FINDINGS:
+> Cardiac silhouette size is normal. Mediastinal and hilar contours are unremarkable. Ill-defined patchy opacities are noted in the left lung base, concerning for pneumonia. Blunting of the costophrenic angles bilaterally suggests trace bilateral pleural effusions.
+>
+> IMPRESSION:
+> Patchy ill-defined left basilar opacity concerning for pneumonia. Small bilateral pleural effusions.
+
+### Writing Rules
+
+FINDINGS section:
+- Write 2-5 sentences of plain prose. No bullets, no headers, no markdown.
+- Start with anatomy/cardiac assessment, then lung findings, then other.
+- Use passive/descriptive voice: "is seen", "are noted", "is present", "is normal", "are unremarkable".
+- Standard phrases to prefer:
+  - Normal heart: "Cardiac silhouette size is normal" or "Cardiomediastinal silhouette is normal"
+  - Normal lungs: "Lungs are clear" or "No focal consolidation"
+  - Normal pleura: "No pleural effusion" or "No pneumothorax"
+  - Combined normal: "No focal consolidation, pleural effusion or pneumothorax"
+  - Cardiomegaly: "The cardiac silhouette is enlarged" or "Cardiomegaly"
+  - Effusion: "Small bilateral pleural effusions" or "Blunting of the costophrenic angles"
+  - Opacity: "Patchy opacity in the [location]" or "Ill-defined opacity"
+  - Edema: "Pulmonary vascular congestion" or "Interstitial edema"
+  - Atelectasis: "Bibasilar atelectasis" or "Patchy atelectasis at the lung bases"
+- Include relevant negatives (e.g., "No pneumothorax" when effusion is present).
+- Do NOT mention tool names, model names, concept priors, or your reasoning process.
+- Do NOT reference prior studies, interval change, or comparison.
+- Do NOT fabricate clinical history or indications.
+
+IMPRESSION section:
+- Exactly 1-2 sentences summarizing the key clinical message.
+- If normal: "No acute cardiopulmonary process." (use this exact phrase when appropriate)
+- If abnormal: state the primary finding and any important secondary findings.
+- Do NOT repeat all FINDINGS — synthesize.
+
+Length target: FINDINGS 30-80 words, IMPRESSION 5-20 words. Total 40-90 words.
+
+### Output Format
 ```
+FINDINGS:
+<plain text paragraph>
+
+IMPRESSION:
+<1-2 sentence summary>
+
 GROUNDINGS:
-[
-  {"finding": "<phrase>", "bbox": [x_min, y_min, x_max, y_max], "tool": "<tool_name>"},
-  {"finding": "<phrase>", "bbox": [x_min, y_min, x_max, y_max], "tool": "<tool_name>", "coverage_pct": 15.2}
-]
+[{"finding": "...", "bbox": [x_min, y_min, x_max, y_max], "tool": "..."}]
 ```
-- bbox: normalized [0,1] coordinates.
-- Include coverage_pct from segmentation tools when available.
-- Only include findings successfully grounded by a tool.
-- Prefer chexagent2_grounding bbox for focal findings; biomedparse_segment bbox for diffuse findings.
+
+GROUNDINGS: JSON array with one entry per grounded finding. Include `coverage_pct` from biomedparse when available. Only include findings that were successfully grounded by a tool.
