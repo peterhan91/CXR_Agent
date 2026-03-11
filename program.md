@@ -275,7 +275,28 @@ If this produces a report with FINDINGS, IMPRESSION, and grounding bounding boxe
 
 Once setup is verified, run baselines on MIMIC-CXR. We use **5 CXRs from the test set** for evaluation and **20-30 CXRs from the validation set** for skill evolution training.
 
-### Step 1: Prepare MIMIC-CXR Splits
+### Step 1: Install CXR-Report-Metric (REQUIRED)
+
+Our goal requires all 5 ReXrank scores. Without this package, `eval_mimic.py` falls back to only BLEU + BERTScore — missing RadCliQ-v1, RadGraph-F1, and SembScore.
+
+```bash
+conda activate cxr_agent
+
+# Install CXR-Report-Metric (requires RadGraph PhysioNet access)
+pip install CXR-Report-Metric
+
+# Verify it imports correctly
+python -c "from CXRMetric.run_eval import calc_metric; print('CXR-Report-Metric OK')"
+```
+
+If the import fails, check:
+- RadGraph model access: requires PhysioNet credentialed access → download checkpoint manually
+- CheXbert checkpoint: auto-downloaded on first use, but may need HuggingFace auth
+- See: https://github.com/rajpurkarlab/CXR-Report-Metric for setup details
+
+**Do not proceed to scoring without this.** The fallback metrics (BLEU + BERTScore only) are insufficient for our goal.
+
+### Step 2: Prepare MIMIC-CXR Splits
 
 ```bash
 cd /path/to/CXR_Agent
@@ -305,7 +326,7 @@ ls /data/physionet/mimic-cxr-jpg/ 2>/dev/null
 ls ~/data/mimic-cxr-jpg/ 2>/dev/null
 ```
 
-### Step 2: Run Baselines (on 5 test CXRs)
+### Step 3: Run Baselines (on 5 test CXRs)
 
 ```bash
 # Sonnet API baseline — vision-only, no tools, no CLEAR
@@ -315,29 +336,38 @@ python scripts/eval_mimic.py --mode sonnet --output results/eval/
 python scripts/eval_mimic.py --mode chexone --output results/eval/
 ```
 
-### Step 3: Run CXR Agent (initial, on 5 test CXRs)
+### Step 4: Run CXR Agent (initial, on 5 test CXRs)
 
 ```bash
 python scripts/eval_mimic.py --mode agent --output results/eval/
 ```
 
-### Step 4: Score and Compare
+### Step 5: Score and Compare
 
 ```bash
-# Score all prediction files
+# Score all prediction files (uses CXR-Report-Metric for all 5 ReXrank scores)
 python scripts/eval_mimic.py --mode score --output results/eval/
 
-# For full ReXrank metrics:
-pip install CXR-Report-Metric
-python scripts/eval_mimic.py --mode score --output results/eval/
+# Verify all 5 metrics are present in each score file
+python -c "
+import json, glob
+for f in sorted(glob.glob('results/eval/scores_*.json')):
+    s = json.load(open(f))
+    metrics = [k for k in ['radcliq_v1','radgraph_f1','semb_score','bertscore_f1','bleu_2'] if k in s]
+    print(f'{f}: {len(metrics)}/5 metrics — {metrics}')
+"
 
 # Compare side-by-side
 python scripts/eval_mimic.py --mode compare --output results/eval/
 ```
 
+If any score file has fewer than 5 metrics, CXR-Report-Metric is not working correctly — go back to Step 1 and fix it.
+
 ## The Experiment Loop
 
 After establishing baselines, enter the improvement loop. The goal: **beat Sonnet API AND CheXOne on every ReXrank metric** (RadCliQ-v1, RadGraph-F1, SembScore, BERTScore, BLEU-2).
+
+**NEVER STOP**: Once the experiment loop has begun, do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep or away and expects you to continue working autonomously until you are manually stopped or all 5 metrics beat both baselines. If you run out of ideas, think harder — re-read the tool outputs, try combining approaches A and B, try more radical prompt changes. The loop runs until the goal is met or the human interrupts you.
 
 **Two approaches** — use either or both:
 
