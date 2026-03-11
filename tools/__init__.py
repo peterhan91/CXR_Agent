@@ -9,6 +9,7 @@ from tools.chexagent2 import (
     CheXagent2VQATool,
 )
 from tools.chexone import CheXOneReportTool
+from tools.chexzero import CheXzeroClassifyTool
 from tools.medversa import (
     MedVersaReportTool,
     MedVersaClassifyTool,
@@ -17,6 +18,7 @@ from tools.medversa import (
     MedVersaVQATool,
 )
 from tools.biomedparse import BiomedParseSegmentTool
+from tools.medsam import MedSAMSegmentTool
 from tools.medsam3 import MedSAM3SegmentTool
 from tools.factchexcker import FactCheXckerVerifyTool
 
@@ -30,7 +32,9 @@ __all__ = [
     "CheXagent2VQATool",
     # CheXOne
     "CheXOneReportTool",
-    # MedVersa (multi-task)
+    # CheXzero (zero-shot classification)
+    "CheXzeroClassifyTool",
+    # MedVersa (multi-task) — broken, kept for reference
     "MedVersaReportTool",
     "MedVersaClassifyTool",
     "MedVersaDetectTool",
@@ -38,6 +42,7 @@ __all__ = [
     "MedVersaVQATool",
     # Segmentation
     "BiomedParseSegmentTool",
+    "MedSAMSegmentTool",
     "MedSAM3SegmentTool",
     # Verification
     "FactCheXckerVerifyTool",

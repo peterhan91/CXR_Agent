@@ -1,7 +1,14 @@
 """MedVersa multi-task tool wrappers."""
 
+import base64
+import hashlib
+from pathlib import Path
+
 import requests
 from tools.base import BaseCXRTool
+
+_MASK_DIR = Path("cache/masks/medversa")
+_MASK_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class MedVersaReportTool(BaseCXRTool):
@@ -202,6 +209,12 @@ class MedVersaSegmentTool(BaseCXRTool):
         if data["has_mask"]:
             lines.append(f"  Coverage: {data['coverage_pct']:.1f}% of image")
             lines.append(f"  Mask shape: {data['mask_shape']}")
+            # Save mask to disk if available
+            if data.get("mask_png_b64"):
+                key = hashlib.md5(f"{image_path}_{prompt or 'default'}".encode()).hexdigest()[:12]
+                mask_path = _MASK_DIR / f"{key}.png"
+                mask_path.write_bytes(base64.b64decode(data["mask_png_b64"]))
+                lines.append(f"  Mask saved: {mask_path}")
         else:
             lines.append("  No segmentation mask produced.")
         return "\n".join(lines)

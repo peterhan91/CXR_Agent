@@ -1,7 +1,14 @@
 """BiomedParse segmentation tool."""
 
+import base64
+import hashlib
+from pathlib import Path
+
 import requests
 from tools.base import BaseCXRTool
+
+_MASK_DIR = Path("cache/masks/biomedparse")
+_MASK_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class BiomedParseSegmentTool(BaseCXRTool):
@@ -55,4 +62,10 @@ class BiomedParseSegmentTool(BaseCXRTool):
         for r in data["results"]:
             lines.append(f"  '{r['prompt']}': {r['coverage_pct']:.1f}% coverage, "
                         f"bbox=[{', '.join(f'{v:.2f}' for v in r['bbox'])}]")
+            # Save mask to disk if available
+            if r.get("mask_png_b64"):
+                key = hashlib.md5(f"{image_path}_{r['prompt']}".encode()).hexdigest()[:12]
+                mask_path = _MASK_DIR / f"{key}.png"
+                mask_path.write_bytes(base64.b64decode(r["mask_png_b64"]))
+                lines.append(f"    Mask saved: {mask_path}")
         return "\n".join(lines)

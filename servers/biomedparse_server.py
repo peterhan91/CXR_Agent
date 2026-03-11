@@ -7,10 +7,13 @@ Usage:
 """
 
 import argparse
+import base64
 import logging
 import sys
 import time
 from contextlib import asynccontextmanager
+from io import BytesIO
+from typing import Optional
 
 import torch
 
@@ -42,6 +45,7 @@ class SegmentResult(BaseModel):
     coverage_pct: float
     bbox: list  # [x_min, y_min, x_max, y_max] normalized 0-1
     mask_shape: list
+    mask_png_b64: Optional[str] = None  # base64-encoded PNG mask
 
 
 class SegmentResponse(BaseModel):
@@ -50,7 +54,9 @@ class SegmentResponse(BaseModel):
 
 
 def mask_to_summary(mask: np.ndarray, prompt: str) -> SegmentResult:
-    """Convert a binary mask to a text-friendly summary."""
+    """Convert a binary mask to a text-friendly summary + base64 PNG."""
+    from PIL import Image as PILImage
+
     binary = (mask > 0.5).astype(np.float32)
     coverage = float(binary.sum() / binary.size * 100)
 
@@ -65,11 +71,18 @@ def mask_to_summary(mask: np.ndarray, prompt: str) -> SegmentResult:
     else:
         bbox = [0, 0, 0, 0]
 
+    # Encode binary mask as PNG (base64)
+    pil_mask = PILImage.fromarray((binary * 255).astype(np.uint8), mode="L")
+    buf = BytesIO()
+    pil_mask.save(buf, format="PNG")
+    mask_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
     return SegmentResult(
         prompt=prompt,
         coverage_pct=round(coverage, 2),
         bbox=bbox,
         mask_shape=list(binary.shape),
+        mask_png_b64=mask_b64,
     )
 
 

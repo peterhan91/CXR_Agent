@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import base64
 import json
 import logging
 import subprocess
@@ -17,7 +18,9 @@ import sys
 import tempfile
 import time
 from contextlib import asynccontextmanager
+from io import BytesIO
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import uvicorn
@@ -39,6 +42,7 @@ class SegmentResponse(BaseModel):
     prompt: str
     coverage_pct: float
     mask_shape: list
+    mask_png_b64: Optional[str] = None  # base64-encoded PNG mask
     inference_time_ms: float
 
 
@@ -117,11 +121,14 @@ async def segment(req: SegmentRequest):
     # Read output mask
     from PIL import Image
     output_file = Path(output_path)
+    mask_b64 = None
     if output_file.exists():
         mask = np.array(Image.open(output_path).convert("L"))
         binary = (mask > 127).astype(np.float32)
         coverage = float(binary.sum() / binary.size * 100)
         mask_shape = list(binary.shape)
+        # Capture mask as base64 PNG before cleanup
+        mask_b64 = base64.b64encode(output_file.read_bytes()).decode("utf-8")
         output_file.unlink()  # cleanup
     else:
         coverage = 0.0
@@ -131,6 +138,7 @@ async def segment(req: SegmentRequest):
         prompt=req.prompt,
         coverage_pct=round(coverage, 2),
         mask_shape=mask_shape,
+        mask_png_b64=mask_b64,
         inference_time_ms=inference_time,
     )
 

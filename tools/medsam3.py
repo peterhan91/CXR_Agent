@@ -1,7 +1,14 @@
 """MedSAM3 text-guided segmentation tool."""
 
+import base64
+import hashlib
+from pathlib import Path
+
 import requests
 from tools.base import BaseCXRTool
+
+_MASK_DIR = Path("cache/masks/medsam3")
+_MASK_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class MedSAM3SegmentTool(BaseCXRTool):
@@ -47,8 +54,15 @@ class MedSAM3SegmentTool(BaseCXRTool):
         )
         resp.raise_for_status()
         data = resp.json()
-        return (
-            f"MedSAM3 Segmentation for '{data['prompt']}':\n"
-            f"  Coverage: {data['coverage_pct']:.1f}% of image\n"
-            f"  Mask shape: {data['mask_shape']}"
-        )
+        lines = [
+            f"MedSAM3 Segmentation for '{data['prompt']}':",
+            f"  Coverage: {data['coverage_pct']:.1f}% of image",
+            f"  Mask shape: {data['mask_shape']}",
+        ]
+        # Save mask to disk if available
+        if data.get("mask_png_b64"):
+            key = hashlib.md5(f"{image_path}_{prompt}".encode()).hexdigest()[:12]
+            mask_path = _MASK_DIR / f"{key}.png"
+            mask_path.write_bytes(base64.b64decode(data["mask_png_b64"]))
+            lines.append(f"  Mask saved: {mask_path}")
+        return "\n".join(lines)

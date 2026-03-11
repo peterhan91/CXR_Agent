@@ -13,11 +13,13 @@ Usage:
 """
 
 import argparse
+import base64
 import logging
 import sys
 import time
 import types
 from contextlib import asynccontextmanager
+from io import BytesIO
 from typing import Optional
 
 # ---------------------------------------------------------------------------
@@ -115,6 +117,7 @@ class SegmentResponse(BaseModel):
     has_mask: bool
     coverage_pct: float
     mask_shape: list
+    mask_png_b64: Optional[str] = None  # base64-encoded PNG mask
     generation_time_ms: float
 
 
@@ -238,11 +241,30 @@ async def segment_2d(req: SegmentRequest):
         req.image_path, req.context, req.prompt, req.modality, "2d segmentation",
     )
     summary = _mask_summary(seg_mask_2d)
+
+    # Encode mask as base64 PNG
+    mask_b64 = None
+    if summary["has_mask"] and seg_mask_2d is not None:
+        from PIL import Image as PILImage
+        arr = np.array(seg_mask_2d) if not isinstance(seg_mask_2d, np.ndarray) else seg_mask_2d
+        if arr.size > 0:
+            # Normalize to 0-255
+            vmin, vmax = arr.min(), arr.max()
+            if vmax > vmin:
+                normalized = ((arr - vmin) / (vmax - vmin) * 255).astype(np.uint8)
+            else:
+                normalized = (arr * 255).astype(np.uint8)
+            pil_mask = PILImage.fromarray(normalized, mode="L")
+            buf = BytesIO()
+            pil_mask.save(buf, format="PNG")
+            mask_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
     return SegmentResponse(
         result=output_text,
         has_mask=summary["has_mask"],
         coverage_pct=summary["coverage_pct"],
         mask_shape=summary["mask_shape"],
+        mask_png_b64=mask_b64,
         generation_time_ms=gen_time,
     )
 
