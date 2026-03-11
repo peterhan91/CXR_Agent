@@ -15,6 +15,7 @@ The concept scoring pipeline:
 6. Return top-K concepts with scores as structured prior for the agent
 """
 
+import hashlib
 import os
 import json
 import logging
@@ -91,6 +92,11 @@ class CLEARConceptScorer:
         self.concepts = None
         self.concept_categories = None
         self.concept_features = None
+
+        # Caches: image embeddings (in-memory) + concept priors (disk-persistent)
+        self._embedding_cache = {}   # image_path -> np.ndarray [768]
+        self._prior_cache = {}       # (image_path, top_k) -> formatted text
+        self._cache_dir = Path("cache/clear")
 
         # Image transform (matches cxr_concept training pipeline)
         self.transform = Compose([
@@ -248,11 +254,45 @@ class CLEARConceptScorer:
 
         return img_tensor.unsqueeze(0)  # [1, 3, 448, 448]
 
+    def _get_image_embedding(self, image_path: str) -> np.ndarray:
+        """Get image embedding, using cache if available.
+
+        Returns normalized [768] embedding vector. Caches in memory
+        for within-session reuse and on disk for cross-session persistence.
+        """
+        # Check in-memory cache
+        if image_path in self._embedding_cache:
+            logger.debug(f"CLEAR embedding cache hit: {image_path}")
+            return self._embedding_cache[image_path]
+
+        # Check disk cache
+        cache_key = hashlib.md5(image_path.encode()).hexdigest()
+        disk_path = self._cache_dir / f"{cache_key}.npy"
+        if disk_path.exists():
+            embedding = np.load(disk_path)
+            self._embedding_cache[image_path] = embedding
+            logger.debug(f"CLEAR disk cache hit: {image_path}")
+            return embedding
+
+        # Compute fresh embedding
+        img_tensor = self._preprocess_image(image_path).to(self.device)
+        with torch.no_grad():
+            img_features = self.model.encode_image(img_tensor)
+            img_features = img_features / img_features.norm(dim=-1, keepdim=True)
+            embedding = img_features.squeeze(0).cpu().numpy()
+
+        # Store in both caches
+        self._embedding_cache[image_path] = embedding
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        np.save(disk_path, embedding)
+
+        return embedding
+
     def score_image(self, image_path: str, top_k: int = 20) -> str:
         """Score a single CXR image against all concepts.
 
         Returns a formatted text string suitable for injection into the
-        agent's system prompt as a concept prior.
+        agent's system prompt as a concept prior. Uses embedding cache.
 
         Args:
             image_path: Path to the CXR image
@@ -264,16 +304,21 @@ class CLEARConceptScorer:
         if self.model is None:
             raise RuntimeError("Model not loaded. Call .load() first.")
 
-        img_tensor = self._preprocess_image(image_path).to(self.device)
+        # Check prior text cache (exact match on image + top_k)
+        cache_key = (image_path, top_k)
+        if cache_key in self._prior_cache:
+            logger.debug(f"CLEAR prior cache hit: {image_path} top_k={top_k}")
+            return self._prior_cache[cache_key]
+
+        embedding = self._get_image_embedding(image_path)
+        embedding_tensor = torch.from_numpy(embedding).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            img_features = self.model.encode_image(img_tensor)
-            img_features = img_features / img_features.norm(dim=-1, keepdim=True)
+            scores = (embedding_tensor @ self.concept_features.T).squeeze(0).cpu().numpy()
 
-            # Cosine similarity with all concepts
-            scores = (img_features @ self.concept_features.T).squeeze(0).cpu().numpy()
-
-        return self._format_concept_prior(scores, top_k)
+        result = self._format_concept_prior(scores, top_k)
+        self._prior_cache[cache_key] = result
+        return result
 
     def score_image_raw(self, image_path: str) -> np.ndarray:
         """Score a single image and return raw scores array.
@@ -284,12 +329,11 @@ class CLEARConceptScorer:
         if self.model is None:
             raise RuntimeError("Model not loaded. Call .load() first.")
 
-        img_tensor = self._preprocess_image(image_path).to(self.device)
+        embedding = self._get_image_embedding(image_path)
+        embedding_tensor = torch.from_numpy(embedding).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            img_features = self.model.encode_image(img_tensor)
-            img_features = img_features / img_features.norm(dim=-1, keepdim=True)
-            scores = (img_features @ self.concept_features.T).squeeze(0).cpu().numpy()
+            scores = (embedding_tensor @ self.concept_features.T).squeeze(0).cpu().numpy()
 
         return scores
 

@@ -101,7 +101,10 @@ async def segment(req: SegmentRequest):
         cmd.extend(["--config", state["config_file"]])
 
     t0 = time.time()
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=120,
+        cwd=state.get("medsam3_dir", None),
+    )
     inference_time = (time.time() - t0) * 1000
 
     if result.returncode != 0:

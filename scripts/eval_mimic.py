@@ -107,6 +107,51 @@ def format_gt_report(findings: str, impression: str, raw_text: str) -> str:
     return raw_text.strip()
 
 
+def strip_groundings(report_text: str) -> tuple:
+    """Strip GROUNDINGS section and preamble from agent report.
+
+    The agent outputs:
+        <preamble reasoning text>
+        FINDINGS: ...
+        IMPRESSION: ...
+        GROUNDINGS: [{"finding": "...", "bbox": [...], "tool": "..."}]
+
+    For metric scoring we need only FINDINGS + IMPRESSION.
+    """
+    groundings = []
+    clean = report_text
+
+    # Split on GROUNDINGS: section
+    m = re.search(r'\n*GROUNDINGS:\s*', clean, re.IGNORECASE)
+    if m:
+        before = clean[:m.start()].strip()
+        after = clean[m.end():].strip()
+        # Try to parse JSON array from the groundings section
+        try:
+            groundings = json.loads(after)
+        except json.JSONDecodeError:
+            # Try to find JSON array within the text
+            bracket_match = re.search(r'\[.*\]', after, re.DOTALL)
+            if bracket_match:
+                try:
+                    groundings = json.loads(bracket_match.group())
+                except json.JSONDecodeError:
+                    pass
+        clean = before
+
+    # Strip preamble text before FINDINGS:
+    findings_match = re.search(r'(?:^|\n)\s*FINDINGS?:\s*', clean, re.IGNORECASE)
+    if findings_match:
+        clean = clean[findings_match.start():].strip()
+
+    # Strip any markdown formatting the agent might still use
+    clean = re.sub(r'^#+\s+', '', clean, flags=re.MULTILINE)  # ## headers
+    clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', clean)  # **bold**
+    clean = re.sub(r'---+', '', clean)  # horizontal rules
+
+    return clean.strip(), groundings
+
+
 # ─── Test Set Preparation ───────────────────────────────────────────────────
 
 
@@ -327,6 +372,7 @@ def run_agent_eval(args):
         config = yaml.safe_load(f)
 
     predictions_path = output_dir / "predictions_agent.json"
+    trajectories_path = output_dir / "trajectories_agent.jsonl"
 
     # Resume
     existing = _load_existing_predictions(predictions_path)
@@ -392,19 +438,26 @@ def run_agent_eval(args):
             in_tok = trajectory.total_input_tokens
             out_tok = trajectory.total_output_tokens
             n_steps = len(trajectory.steps)
+            steps = trajectory.steps
         except Exception as e:
             logger.error(f"Agent failed for {study_id}: {e}", exc_info=True)
             report = ""
             in_tok = out_tok = n_steps = 0
+            steps = []
             errors += 1
 
         wall_ms = (time.time() - t0) * 1000
         cum_in += in_tok
         cum_out += out_tok
 
+        # Strip groundings from report for metric scoring
+        clean_report, groundings = strip_groundings(report)
+
         pred = {
             "study_id": study_id,
-            "report_pred": report,
+            "report_pred": clean_report,
+            "report_pred_raw": report,
+            "groundings": groundings,
             "input_tokens": in_tok,
             "output_tokens": out_tok,
             "num_steps": n_steps,
@@ -412,6 +465,17 @@ def run_agent_eval(args):
         }
         predictions.append(pred)
         existing[study_id] = pred
+
+        # Save full trajectory (tool calls, thinking, final report)
+        traj_record = {
+            "study_id": study_id,
+            "num_steps": n_steps,
+            "wall_time_ms": wall_ms,
+            "groundings": groundings,
+            "steps": steps,
+        }
+        with open(trajectories_path, "a") as f:
+            f.write(json.dumps(traj_record) + "\n")
 
         # Save every 5 studies
         if len(predictions) % 5 == 0:
@@ -426,7 +490,14 @@ def run_agent_eval(args):
 
     _save_predictions(predictions_path, predictions)
 
+    # Build and save tool usage summary
+    _save_tool_summary(trajectories_path, output_dir, tools)
+
+    # Generate grounded CXR images with bbox overlays
+    _save_grounded_images(predictions, test_set, output_dir)
+
     print(f"\nAgent: {len(predictions)} predictions -> {predictions_path}")
+    print(f"Trajectories: {trajectories_path}")
     print(f"Total tokens: {cum_in:,} input, {cum_out:,} output")
     if errors:
         print(f"Errors: {errors}")
@@ -777,6 +848,145 @@ def _save_predictions(path: Path, predictions: list):
     with open(tmp_path, "w") as f:
         json.dump(predictions, f, indent=2)
     tmp_path.rename(path)
+
+
+def _save_tool_summary(trajectories_path: Path, output_dir: Path, tools: list):
+    """Build and save aggregated tool usage summary from trajectories."""
+    from collections import Counter
+
+    if not trajectories_path.exists():
+        return
+
+    all_tool_names = {t.name for t in tools}
+    tool_counts = Counter()
+    per_study_counts = []
+    total_studies = 0
+
+    with open(trajectories_path) as f:
+        for line in f:
+            record = json.loads(line)
+            total_studies += 1
+            study_tool_counts = Counter()
+            for step in record.get("steps", []):
+                if step.get("type") == "tool_call":
+                    name = step["tool_name"]
+                    tool_counts[name] += 1
+                    study_tool_counts[name] += 1
+            per_study_counts.append(study_tool_counts)
+
+    total_calls = sum(tool_counts.values())
+    called_tools = set(tool_counts.keys())
+    never_called = sorted(all_tool_names - called_tools)
+
+    summary = {
+        "total_studies": total_studies,
+        "total_tool_calls": total_calls,
+        "avg_tools_per_study": round(total_calls / total_studies, 1) if total_studies else 0,
+        "tool_calls": dict(tool_counts.most_common()),
+        "tools_never_called": never_called,
+    }
+
+    summary_path = output_dir / "tool_summary_agent.json"
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"Tool summary: {summary_path}")
+    print(f"  Total tool calls: {total_calls} across {total_studies} studies")
+    print(f"  Tools used: {sorted(called_tools)}")
+    if never_called:
+        print(f"  Never called: {never_called}")
+
+
+def _save_grounded_images(predictions: list, test_set: list, output_dir: Path):
+    """Render grounded CXR images with bbox overlays and save alongside reports."""
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        logger.warning("Pillow not installed, skipping grounded image generation")
+        return
+
+    gt_by_study = {e["study_id"]: e for e in test_set}
+    grounded_dir = output_dir / "grounded"
+    grounded_dir.mkdir(exist_ok=True)
+
+    # Color palette for different findings
+    colors = [
+        (255, 80, 80),    # red
+        (80, 140, 255),   # blue
+        (80, 220, 80),    # green
+        (255, 180, 40),   # orange
+        (200, 80, 255),   # purple
+        (255, 255, 80),   # yellow
+    ]
+
+    for pred in predictions:
+        sid = pred["study_id"]
+        groundings = pred.get("groundings", [])
+        entry = gt_by_study.get(sid)
+        if not entry or not groundings:
+            continue
+
+        image_path = entry["image_path"]
+        try:
+            img = Image.open(image_path).convert("RGB")
+        except Exception as e:
+            logger.warning(f"Cannot open image for {sid}: {e}")
+            continue
+
+        draw = ImageDraw.Draw(img)
+        w, h = img.size
+
+        # Try to load a font for labels
+        try:
+            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", max(16, h // 40))
+        except Exception:
+            font = ImageFont.load_default()
+
+        for idx, g in enumerate(groundings):
+            finding = g.get("finding", "")
+            bbox = g.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+
+            color = colors[idx % len(colors)]
+            # Normalize bbox to pixel coordinates
+            x_min, y_min, x_max, y_max = bbox
+            # Handle both [0,1] normalized and already-pixel coords
+            if all(0 <= v <= 1.0 for v in bbox):
+                x_min, x_max = x_min * w, x_max * w
+                y_min, y_max = y_min * h, y_max * h
+
+            # Draw bbox (3px thick)
+            for offset in range(3):
+                draw.rectangle(
+                    [x_min - offset, y_min - offset, x_max + offset, y_max + offset],
+                    outline=color,
+                )
+
+            # Draw label background + text
+            label = finding[:50]  # truncate long labels
+            text_bbox = draw.textbbox((x_min, y_min), label, font=font)
+            text_w = text_bbox[2] - text_bbox[0]
+            text_h = text_bbox[3] - text_bbox[1]
+            label_y = max(0, y_min - text_h - 4)
+            draw.rectangle([x_min, label_y, x_min + text_w + 4, label_y + text_h + 4], fill=color)
+            draw.text((x_min + 2, label_y + 2), label, fill=(255, 255, 255), font=font)
+
+        # Save annotated image
+        out_path = grounded_dir / f"{sid}_grounded.png"
+        img.save(out_path)
+
+        # Save the report text alongside
+        report_path = grounded_dir / f"{sid}_report.txt"
+        report_path.write_text(pred.get("report_pred", ""))
+
+        # Save groundings JSON
+        gnd_path = grounded_dir / f"{sid}_groundings.json"
+        with open(gnd_path, "w") as f:
+            json.dump(groundings, f, indent=2)
+
+        logger.info(f"Grounded image saved: {out_path} ({len(groundings)} findings)")
+
+    print(f"Grounded images: {grounded_dir}/")
 
 
 def _print_summary(mode_name: str, predictions: list, errors: int, path: Path):

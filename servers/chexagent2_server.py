@@ -111,20 +111,46 @@ class ReportResponse(BaseModel):
 # --- Helpers ---
 
 def _parse_boxes(text: str) -> list:
-    """Parse bounding box coordinates from model output.
+    """Parse bounding box coordinates from CheXagent-2 output.
 
-    CheXagent-2 typically outputs coordinates as (x1, y1, x2, y2) on a
-    0-1000 or 0-100 scale. This parser handles both and normalizes to 0-1.
+    CheXagent-2 outputs bounding boxes in two possible formats:
+    1. <|box|> (x1,y1),(x2,y2) <|/box|>  — two 2-tuples (most common)
+    2. (x1, y1, x2, y2) or [x1, y1, x2, y2]  — single 4-tuple
+
+    Coordinates are on a 0-100 scale (percentage). Normalizes to 0-1.
     """
     boxes = []
-    # Match patterns like (123, 456, 789, 012) or [123, 456, 789, 012]
+
+    # Format 1: CheXagent-2 style <|box|> (x1,y1),(x2,y2) <|/box|>
+    box_tags = re.findall(r'<\|box\|>\s*(.*?)\s*<\|/box\|>', text)
+    for tag_content in box_tags:
+        # Parse (x1,y1),(x2,y2) pairs within the tag
+        pairs = re.findall(
+            r'\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\)',
+            tag_content
+        )
+        # Each pair of 2-tuples forms one box
+        for i in range(0, len(pairs) - 1, 2):
+            x1, y1 = float(pairs[i][0]), float(pairs[i][1])
+            x2, y2 = float(pairs[i+1][0]), float(pairs[i+1][1])
+            scale = 1000.0 if any(c > 100 for c in [x1,y1,x2,y2]) else (100.0 if any(c > 1 for c in [x1,y1,x2,y2]) else 1.0)
+            boxes.append({
+                "x_min": x1 / scale,
+                "y_min": y1 / scale,
+                "x_max": x2 / scale,
+                "y_max": y2 / scale,
+            })
+
+    if boxes:
+        return boxes
+
+    # Format 2: fallback — single 4-tuple (x1, y1, x2, y2)
     patterns = re.findall(
         r'[\(\[]\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*[\)\]]',
         text
     )
     for match in patterns:
         coords = [float(c) for c in match]
-        # Determine scale: if any coord > 1, normalize
         scale = 1000.0 if any(c > 100 for c in coords) else (100.0 if any(c > 1 for c in coords) else 1.0)
         boxes.append({
             "x_min": coords[0] / scale,

@@ -16,8 +16,26 @@ import argparse
 import logging
 import sys
 import time
+import types
 from contextlib import asynccontextmanager
 from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Monkey-patch ipdb/pdb to prevent set_trace() calls in MedVersa from
+# triggering bdb.BdbQuit and crashing the server.  MedVersa ships with
+# ipdb.set_trace() left in its inference path (medomni/models/medomni.py:292
+# among others).  We install a fake ipdb module so every `import ipdb` and
+# `ipdb.set_trace()` becomes a silent no-op.
+# ---------------------------------------------------------------------------
+_fake_ipdb = types.ModuleType("ipdb")
+_fake_ipdb.set_trace = lambda *a, **kw: None
+_fake_ipdb.launch_ipdb_on_exception = lambda *a, **kw: None
+_fake_ipdb.post_mortem = lambda *a, **kw: None
+_fake_ipdb.pm = lambda *a, **kw: None
+_fake_ipdb.run = lambda *a, **kw: None
+_fake_ipdb.runcall = lambda *a, **kw: None
+_fake_ipdb.runeval = lambda *a, **kw: None
+sys.modules["ipdb"] = _fake_ipdb
 
 import numpy as np
 import uvicorn

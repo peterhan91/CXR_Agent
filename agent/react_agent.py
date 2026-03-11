@@ -131,10 +131,16 @@ class CXRReActAgent:
     def _execute_tool(self, tool_name: str, tool_input: dict) -> ToolResult:
         """Execute a tool by name with given input.
 
+        Uses the shared tool response cache for deterministic tools
+        (same image + same params = same output). FactCheXcker verify
+        is excluded from caching since its input (draft report) changes.
+
         Analogous to mimic_skills' AgentExecutor tool dispatch, but simpler
         since Anthropic API provides structured tool_name and tool_input
         (no regex parsing needed like DiagnosisWorkflowParser).
         """
+        from tools.base import cached_tool_call
+
         start_time = time.time()
 
         tool = self._tool_map.get(tool_name)
@@ -143,7 +149,11 @@ class CXRReActAgent:
             logger.warning(output)
         else:
             try:
-                output = tool.run(**tool_input)
+                # Use cache for deterministic tools (skip for verify which takes variable report text)
+                if tool_name == "factchexcker_verify":
+                    output = tool.run(**tool_input)
+                else:
+                    output = cached_tool_call(tool_name, tool.run, **tool_input)
                 if output is None:
                     output = "(tool returned no output)"
             except Exception as e:

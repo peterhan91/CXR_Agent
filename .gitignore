@@ -23,6 +23,7 @@ env/
 logs/
 results/
 trajectories/
+cache/
 *.log
 
 # Model weights and large files

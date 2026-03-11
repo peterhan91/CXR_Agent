@@ -19,17 +19,18 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PARENT_DIR="$(dirname "$REPO_ROOT")"
 
 MEDVERSA_DIR="${PARENT_DIR}/MedVersa"
-BIOMEDPARSE_DIR="${PARENT_DIR}/BiomedParse"
+BIOMEDPARSE_DIR="${PARENT_DIR}/BiomedParse-v1"  # v1 worktree (2D CXR); main branch is v2 (3D only)
 MEDSAM3_DIR="${PARENT_DIR}/MedSAM3"
 FACTCHEXCKER_DIR="${PARENT_DIR}/FactCheXcker"
 
 LOG_DIR="${REPO_ROOT}/logs"
 mkdir -p "$LOG_DIR"
 
-# Conda environments — CheXagent-2 needs transformers==4.40.0 (incompatible with CheXOne's Qwen2.5-VL)
+# Conda environments — models with incompatible transformers versions get separate envs
 CONDA_BASE="$(conda info --base)"
-CHEXAGENT2_PYTHON="${CONDA_BASE}/envs/cxr_chexagent2/bin/python"
-MAIN_PYTHON="${CONDA_BASE}/envs/cxr_agent/bin/python"
+CHEXAGENT2_PYTHON="${CONDA_BASE}/envs/cxr_chexagent2/bin/python"  # transformers==4.40.0
+MEDVERSA_PYTHON="${CONDA_BASE}/envs/cxr_medversa/bin/python"      # transformers==4.28.1
+MAIN_PYTHON="${CONDA_BASE}/envs/cxr_agent/bin/python"              # transformers>=4.57
 
 # Stop all servers
 if [ "$1" = "--stop" ]; then
@@ -77,6 +78,7 @@ echo "  PID: $!"
 
 if [ -d "${BIOMEDPARSE_DIR}" ]; then
     echo "[GPU 1] Starting BiomedParse server on :8005..."
+    LD_LIBRARY_PATH="${CONDA_BASE}/envs/cxr_agent/lib:${LD_LIBRARY_PATH}" \
     CUDA_VISIBLE_DEVICES=1 "${MAIN_PYTHON}" "${REPO_ROOT}/servers/biomedparse_server.py" \
         --port 8005 \
         --biomedparse_dir "${BIOMEDPARSE_DIR}" \
@@ -89,7 +91,7 @@ fi
 # --- GPU 2: MedVersa (multi-task) + MedSAM3 + FactCheXcker ---
 if [ -d "${MEDVERSA_DIR}" ]; then
     echo "[GPU 2] Starting MedVersa server on :8004 (report, classify, detect, segment, VQA)..."
-    CUDA_VISIBLE_DEVICES=2 "${MAIN_PYTHON}" "${REPO_ROOT}/servers/medversa_server.py" \
+    CUDA_VISIBLE_DEVICES=2 "${MEDVERSA_PYTHON}" "${REPO_ROOT}/servers/medversa_server.py" \
         --port 8004 \
         --medversa_dir "${MEDVERSA_DIR}" \
         > "${LOG_DIR}/medversa.log" 2>&1 &

@@ -1,0 +1,82 @@
+# CXR Agent Configuration — Grounded Report Generation (all 14 tools)
+# All 6 servers: CheXagent-2, CheXOne, MedVersa, BiomedParse, MedSAM3, FactCheXcker
+
+agent:
+  model: "claude-sonnet-4-6"
+  max_iterations: 12
+  max_tokens: 4096
+  temperature: 0.0
+  reasoning_effort: "medium"
+
+clear:
+  model_path: "../cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt"
+  concepts_path: "../cxr_concept/CheXzero/concepts/mimic_concepts.csv"
+  dinov2_model_name: "dinov2_vitb14"
+  image_resolution: 448
+  top_k: 20
+
+tools:
+  # Report generators
+  chexagent2:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexagent2_srrg:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexone:
+    enabled: true
+    endpoint: "http://localhost:8002"
+
+  # Classification
+  chexagent2_classify:
+    enabled: true
+    endpoint: "http://localhost:8001"
+
+  # Grounding (bounding boxes for findings)
+  chexagent2_grounding:
+    enabled: true
+    endpoint: "http://localhost:8001"
+
+  # VQA
+  chexagent2_vqa:
+    enabled: true
+    endpoint: "http://localhost:8001"
+
+  # MedVersa (multi-task)
+  medversa:
+    enabled: true
+    endpoint: "http://localhost:8004"
+  medversa_classify:
+    enabled: true
+    endpoint: "http://localhost:8004"
+  medversa_detect:
+    enabled: true
+    endpoint: "http://localhost:8004"
+  medversa_segment:
+    enabled: true
+    endpoint: "http://localhost:8004"
+  medversa_vqa:
+    enabled: true
+    endpoint: "http://localhost:8004"
+
+  # Segmentation
+  biomedparse:
+    enabled: true
+    endpoint: "http://localhost:8005"
+  medsam3:
+    enabled: true
+    endpoint: "http://localhost:8006"
+
+  # Verification
+  factchexcker:
+    enabled: true
+    endpoint: "http://localhost:8007"
+
+skill:
+  enabled: false
+  path: null
+
+logging:
+  level: "INFO"
+  save_trajectories: true
+  trajectory_dir: "trajectories/"

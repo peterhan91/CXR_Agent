@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 # Directory containing skill markdown files
 _SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
+# Default skill files loaded when no explicit list is provided
+_DEFAULT_SKILLS = ["grounded_report.md"]
+
 
 def _load_skill_file(filename: str) -> str:
     """Load a skill markdown file and strip YAML frontmatter."""
@@ -35,18 +38,34 @@ def _load_skill_file(filename: str) -> str:
 # Fixed system prompt — contains ONLY hard constraints that evotest must never override.
 # Clinical reasoning strategy (tool selection, interpretation, workflow) belongs in
 # the evolved skill, not here.
-SYSTEM_PROMPT = """You are a radiology AI assistant. Generate a chest X-ray report using the available tools.
+SYSTEM_PROMPT = """You are a radiology AI assistant generating concise chest X-ray reports with grounded findings.
 
-Output format — your final report MUST contain exactly these two sections:
-  FINDINGS: Describe each observation with laterality, location, and severity.
-  IMPRESSION: Summarize the key findings in 1-3 sentences.
+Output format — your final report MUST use this exact structure:
 
-Hard constraints:
+FINDINGS:
+<one concise paragraph, 60-100 words, plain text, no markdown>
+
+IMPRESSION:
+<numbered list of 1-4 key findings>
+
+GROUNDINGS:
+<JSON array mapping key findings to bounding boxes from grounding tools>
+
+Report style (CRITICAL for evaluation — match MIMIC-CXR format):
+- Write plain text only. NO markdown formatting (no ##, no **, no bullets, no bold).
+- Be concise: aim for 80-150 words total for FINDINGS + IMPRESSION combined.
+- Use standard radiology phrasing (e.g., "There is...", "No evidence of...", "The cardiac silhouette is...").
+- Do NOT mention tool names, model names, or "concept prior" in report text.
+- Do NOT discuss model agreement or disagreement in report text.
 - Only report findings supported by tool outputs or the concept prior. Do not invent findings.
-- Never mention "compared to prior", "interval change", or prior studies — no prior study is provided in the current setup.
+- Never mention "compared to prior", "interval change", or prior studies.
 - Never fabricate patient history, clinical indication, or symptoms.
-- If tools disagree on a finding, state the uncertainty rather than silently picking one.
-- Replace specific measurements (e.g., "3.2 cm above the carina") with qualitative descriptions unless verified by FactCheXcker.
+- Replace specific measurements with qualitative descriptions unless verified.
+
+Grounding:
+- For each key abnormal finding, use a grounding tool to get its bounding box.
+- Include grounding results in the GROUNDINGS section as JSON array.
+- Format: [{"finding": "<phrase>", "bbox": [x_min, y_min, x_max, y_max], "tool": "<tool_name>"}]
 """
 
 
@@ -54,15 +73,13 @@ def build_skills_prompt(enabled_skills: list = None) -> str:
     """Load and assemble skill files into a single prompt block.
 
     Args:
-        enabled_skills: List of skill filenames to load. If None, loads all
-            skill files in default order.
+        enabled_skills: List of skill filenames to load. If None, loads
+            default skill files.
 
     Returns:
         Combined skill text for injection into system prompt.
     """
-    # No default skills — all clinical reasoning strategy is evolved via evotest.
-    # Pass explicit filenames to load specific skills.
-    skills_to_load = enabled_skills or []
+    skills_to_load = enabled_skills if enabled_skills is not None else _DEFAULT_SKILLS
     skill_texts = []
 
     for filename in skills_to_load:
