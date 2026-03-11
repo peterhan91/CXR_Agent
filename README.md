@@ -194,11 +194,35 @@ CXR_Agent/
 
 CLEAR runs in-process on whichever GPU the agent process uses (CPU also works, ~2 GB).
 
-## Not Yet Implemented
+## Next Steps
 
-- **Prior + current CXR comparison**: Currently the agent processes a single CXR image and is constrained to never mention "compared to prior" or "interval change." In clinical practice, comparison to prior studies is essential. Future work: accept a prior CXR alongside the current study, compute CLEAR concept priors for both, pass both images to multi-image-capable tools (CheXagent-2, CheXOne), and lift the no-comparison constraint so the agent can report interval changes.
-- **Evotest skill evolution**: The `skills/` directory and skill injection infrastructure (`build_skills_prompt`, `SKILL_INJECTION_TEMPLATE`, `--skill_path` flag) are in place but unused. The fixed `SYSTEM_PROMPT` contains only hard constraints (output format, anti-hallucination). All clinical reasoning strategy (tool selection, score interpretation, workflow) is meant to be evolved via reward-driven optimization and injected as a skill.
-- **CRIMSON / ReXrank reward wrappers**: Reward models for evaluating generated reports. Needed for evolutionary skill optimization.
-- **Interactive reporting frontend**: Click on a finding in the report to highlight the corresponding segmentation mask on the CXR image. The grounding/segmentation tools already return spatial data (bounding boxes, coverage percentages); a frontend needs to render these overlays.
-- **MedVersa task string verification**: The exact task parameter values (`"vqa"`, `"classification"`, `"detection"`, `"2d segmentation"`) passed to MedVersa's `generate_predictions()` need empirical testing against the actual MedVersa repo.
-- **Batch evaluation on MIMIC-CXR**: `precompute_concepts.py` and `score_batch_h5()` support batch CLEAR scoring, but end-to-end batch evaluation with metrics is not wired up.
+### GPU server setup — March 11
+
+1. **Clone external repos** (MedVersa, BiomedParse, MedSAM3, FactCheXcker) — see `scripts/validate_models/GPU_SERVER_SETUP.md`
+2. **Install environments** — base conda env + per-model deps from `envs/*.txt`
+3. **Download model weights** — HuggingFace models auto-download on first use; CLEAR checkpoint is manual
+4. **Validate each model** — `python scripts/validate_models/validate_all.py`
+5. **Launch all 6 servers** — `bash scripts/launch_servers.sh` and verify health endpoints
+6. **Smoke test the agent** — `python scripts/run_agent.py --image /path/to/test_cxr.png`
+
+### MIMIC-CXR evaluation: CheXOne (baseline) vs. CXR Agent — March 12
+
+Goal: compare reports from CheXOne alone vs. full agent on the MIMIC-CXR test set using ReXrank metrics.
+
+1. **Prepare MIMIC-CXR test split** — extract test image paths + ground truth reports (FINDINGS + IMPRESSION) into a JSON
+2. **Run CheXOne baseline** — for each test image, call CheXOne server directly (no agent, no CLEAR prior), save generated reports
+3. **Run CXR Agent** — for each test image, run the full agent pipeline (`run_agent.py`), save generated reports
+4. **Install [CXR-Report-Metric](https://github.com/rajpurkarlab/CXR-Report-Metric)** — computes all ReXrank metrics
+5. **Score both** — compute RadCliQ-v1 (primary), RadGraph-F1, SembScore, BERTScore, BLEU-2 for baseline and agent
+6. **Compare** — side-by-side metric table, per-study analysis of where the agent helps vs. hurts
+
+Deliverable: `scripts/eval_mimic.py` with `--mode chexone` (baseline) and `--mode agent` (ours).
+
+### Future
+
+- **Prior + current CXR comparison**: Accept a prior CXR alongside the current study, compute CLEAR priors for both, pass both images to multi-image-capable tools (CheXagent-2, CheXOne), lift the no-comparison constraint to report interval changes.
+- **Evotest skill evolution**: The `skills/` directory and skill injection infrastructure are in place. The fixed `SYSTEM_PROMPT` contains only hard constraints. All clinical reasoning strategy is meant to be evolved via reward-driven optimization.
+- **CRIMSON / ReXrank reward wrappers**: Reward models for evolutionary skill optimization.
+- **Interactive reporting frontend**: Click on findings to highlight segmentation masks on the CXR.
+- **MedVersa task string verification**: Exact task parameter values need empirical testing against the MedVersa repo.
+- **ReXrank leaderboard submission**: After MIMIC-CXR eval, prepare inference script in ReXrank format (`python inference.py <input_json> <output_json> <img_root>`) and submit to ReXrank for evaluation on the private ReXGradient dataset (10K studies, 67 sites).
