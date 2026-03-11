@@ -1,9 +1,10 @@
-# CXR Agent Configuration — Grounded Report Generation (all 14 tools)
-# All 6 servers: CheXagent-2, CheXOne, MedVersa, BiomedParse, MedSAM3, FactCheXcker
+# CXR Agent Configuration — Grounded Report Generation
+# Active servers (9 tools): CheXagent-2 (5 tools), CheXOne, CheXzero, BiomedParse, FactCheXcker
+# Disabled: MedVersa (hallucinating), MedSAM (poor CXR quality), MedSAM3 (replaced)
 
 agent:
   model: "claude-sonnet-4-6"
-  max_iterations: 12
+  max_iterations: 15
   max_tokens: 4096
   temperature: 0.0
   reasoning_effort: "medium"
@@ -31,6 +32,9 @@ tools:
   chexagent2_classify:
     enabled: true
     endpoint: "http://localhost:8001"
+  chexzero:
+    enabled: true
+    endpoint: "http://localhost:8008"
 
   # Grounding (bounding boxes for findings)
   chexagent2_grounding:
@@ -42,29 +46,32 @@ tools:
     enabled: true
     endpoint: "http://localhost:8001"
 
-  # MedVersa (multi-task)
+  # MedVersa — DISABLED (produces hallucinated outputs)
   medversa:
-    enabled: true
+    enabled: false
     endpoint: "http://localhost:8004"
   medversa_classify:
-    enabled: true
+    enabled: false
     endpoint: "http://localhost:8004"
   medversa_detect:
-    enabled: true
+    enabled: false
     endpoint: "http://localhost:8004"
   medversa_segment:
-    enabled: true
+    enabled: false
     endpoint: "http://localhost:8004"
   medversa_vqa:
-    enabled: true
+    enabled: false
     endpoint: "http://localhost:8004"
 
   # Segmentation
   biomedparse:
     enabled: true
     endpoint: "http://localhost:8005"
+  medsam:
+    enabled: false
+    endpoint: "http://localhost:8009"
   medsam3:
-    enabled: true
+    enabled: false
     endpoint: "http://localhost:8006"
 
   # Verification
@@ -73,7 +80,7 @@ tools:
     endpoint: "http://localhost:8007"
 
 skill:
-  enabled: false
+  enabled: true
   path: null
 
 logging:
