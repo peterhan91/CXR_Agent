@@ -196,7 +196,13 @@ CLEAR runs in-process on whichever GPU the agent process uses (CPU also works, ~
 
 ## Next Steps
 
-### March 11 — Setup + Eval
+### Day 1 — Grounded Reports that Beat Baselines
+
+**Goal**: Produce **grounded radiology reports** — each finding is linked to spatial locations in the CXR image via bounding boxes and/or segmentation masks — and **outperform both Sonnet API and CheXOne on all ReXrank scores** (RadCliQ-v1, RadGraph-F1, SembScore, BERTScore, BLEU-2).
+
+![Grounded report example](figures/GUI_example.png)
+
+*Grounded reports link textual findings (e.g. "Narrowed joint space", "osteophytes") to precise spatial locations in the image via bounding boxes and segmentation masks, enabling click-to-highlight verification.*
 
 **Server setup:**
 1. Clone external repos (MedVersa, BiomedParse, MedSAM3, FactCheXcker) — see `scripts/validate_models/GPU_SERVER_SETUP.md`
@@ -206,21 +212,54 @@ CLEAR runs in-process on whichever GPU the agent process uses (CPU also works, ~
 5. Launch all 6 servers — `bash scripts/launch_servers.sh`, verify health endpoints
 6. Smoke test — `python scripts/run_agent.py --image /path/to/test_cxr.png`
 
-**MIMIC-CXR evaluation (CheXOne baseline vs. CXR Agent):**
+**MIMIC-CXR evaluation (3 baselines + CXR Agent):**
 7. Prepare MIMIC-CXR test split — image paths + ground truth reports (FINDINGS + IMPRESSION) as JSON
-8. Run CheXOne baseline — call CheXOne server directly, no agent, no CLEAR prior
-9. Run CXR Agent — full pipeline via `run_agent.py`
-10. Install [CXR-Report-Metric](https://github.com/rajpurkarlab/CXR-Report-Metric) — computes all ReXrank metrics
-11. Score both — RadCliQ-v1 (primary), RadGraph-F1, SembScore, BERTScore, BLEU-2
-12. Compare — side-by-side metric table
+8. Run Sonnet API baseline — Claude Sonnet vision-only, no tools, no CLEAR prior
+9. Run CheXOne baseline — call CheXOne server directly, no agent, no CLEAR prior
+10. Run CXR Agent — full grounded pipeline via `run_agent.py`
+11. Install [CXR-Report-Metric](https://github.com/rajpurkarlab/CXR-Report-Metric) — computes all ReXrank metrics
+12. Score all — RadCliQ-v1 (primary), RadGraph-F1, SembScore, BERTScore, BLEU-2
+13. Compare — CXR Agent must beat Sonnet API and CheXOne on **every** metric
+14. If any metric falls short → iterate on agent prompts, tool strategy, and grounding integration until all metrics are exceeded
 
-Deliverable: `scripts/eval_mimic.py` with `--mode chexone` (baseline) and `--mode agent` (ours).
+**Grounded report output format:**
+```json
+{
+  "findings": "Cardiomegaly. Bilateral pleural effusions, left greater than right. No pneumothorax.",
+  "impression": "Cardiomegaly with bilateral pleural effusions.",
+  "grounding": [
+    {
+      "finding": "Cardiomegaly",
+      "boxes": [[0.25, 0.30, 0.75, 0.85]],
+      "mask": null
+    },
+    {
+      "finding": "Left pleural effusion",
+      "boxes": [[0.55, 0.70, 0.95, 0.98]],
+      "mask": "base64-encoded RLE or PNG mask"
+    },
+    {
+      "finding": "Right pleural effusion",
+      "boxes": [[0.05, 0.75, 0.45, 0.98]],
+      "mask": "base64-encoded RLE or PNG mask"
+    }
+  ]
+}
+```
+
+Each finding can be grounded via **bounding boxes**, **segmentation masks**, or both:
+- **Boxes**: `chexagent2_grounding` (phrase grounding), `medversa_detect` (abnormality detection). Normalized 0–1 `[x_min, y_min, x_max, y_max]`.
+- **Masks**: `biomedparse_segment` (anatomical/pathology segmentation), `medsam3_segment` (text-guided SAM), `medversa_segment` (2D segmentation with coverage %). Pixel-level region delineation.
+
+Boxes are fast and always available; masks provide precise spatial extent for diffuse findings (e.g. opacities, effusions, pneumonia) where a rectangle is insufficient.
+
+Deliverable: `scripts/eval_mimic.py` with `--mode sonnet` / `--mode chexone` / `--mode agent`, where agent mode produces grounded reports and beats both baselines on all ReXrank scores.
 
 ### Future
 
 - **Prior + current CXR comparison**: Accept a prior CXR alongside the current study, compute CLEAR priors for both, pass both images to multi-image-capable tools (CheXagent-2, CheXOne), lift the no-comparison constraint to report interval changes.
 - **Evotest skill evolution**: The `skills/` directory and skill injection infrastructure are in place. The fixed `SYSTEM_PROMPT` contains only hard constraints. All clinical reasoning strategy is meant to be evolved via reward-driven optimization.
 - **CRIMSON / ReXrank reward wrappers**: Reward models for evolutionary skill optimization.
-- **Interactive reporting frontend**: Click on findings to highlight segmentation masks on the CXR.
+- **Interactive reporting frontend**: Click on grounded findings to highlight bounding boxes and segmentation masks on the CXR.
 - **MedVersa task string verification**: Exact task parameter values need empirical testing against the MedVersa repo.
 - **ReXrank leaderboard submission**: After MIMIC-CXR eval, prepare inference script in ReXrank format (`python inference.py <input_json> <output_json> <img_root>`) and submit to ReXrank for evaluation on the private ReXGradient dataset (10K studies, 67 sites).
