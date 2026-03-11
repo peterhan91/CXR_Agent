@@ -1,0 +1,9 @@
+# BiomedParse v1 server
+# conda create -n biomedparse python=3.10
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# pip install -r envs/biomedparse.txt
+# pip install git+https://github.com/facebookresearch/detectron2.git
+-r base.txt
+huggingface_hub
+hydra-core
+opencv-python

@@ -1,0 +1,5 @@
+# MedVersa server (7B model)
+# Recommended: use the environment.yml from the MedVersa repo
+# conda env create -f environment.yml
+# Then additionally install:
+-r base.txt

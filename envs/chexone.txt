@@ -1,0 +1,8 @@
+# CheXOne server (Qwen2.5-VL based)
+# conda create -n chexone python=3.10
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# pip install -r envs/chexone.txt
+-r base.txt
+transformers>=4.45
+accelerate
+qwen-vl-utils

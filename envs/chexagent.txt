@@ -1,0 +1,12 @@
+# CheXagent-2 + CheXagent-2-SRRG server
+# conda create -n chexagent python=3.10
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# pip install -r envs/chexagent.txt
+-r base.txt
+transformers>=4.40
+accelerate
+sentencepiece
+protobuf
+opencv-python
+albumentations
+einops

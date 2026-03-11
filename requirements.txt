@@ -1,0 +1,16 @@
+# Core
+anthropic>=0.40.0
+tenacity>=8.0
+pyyaml>=6.0
+
+# CLEAR concept scorer (from cxr_concept)
+torch>=2.0
+torchvision>=0.15
+numpy>=1.24
+h5py>=3.8
+Pillow>=9.0
+ftfy
+regex
+
+# CXR model tools (Step 3 - will expand)
+transformers>=4.40

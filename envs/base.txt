@@ -1,0 +1,6 @@
+# Base requirements shared across all model envs
+fastapi>=0.104
+uvicorn>=0.24
+Pillow>=9.0
+numpy>=1.24
+requests>=2.28

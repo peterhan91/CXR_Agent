@@ -1,0 +1,432 @@
+"""
+CXR Report Generation ReAct Agent using Anthropic native tool-use.
+
+Adapted from mimic_skills' CustomZeroShotAgent (LangChain ZeroShotAgent),
+redesigned to use Anthropic's structured tool-use API instead of text-based
+ReAct parsing. This eliminates regex parsing failures and provides
+reliable tool invocation.
+
+Key differences from mimic_skills:
+- No LangChain dependency; uses anthropic SDK directly
+- Tools defined as Anthropic JSON schemas (not LangChain BaseTool)
+- ReAct loop managed explicitly (not via AgentExecutor)
+- CLEAR concept priors injected as structured context
+- Goal is report generation, not diagnosis
+"""
+
+import base64
+import mimetypes
+import time
+import logging
+from typing import Any, Optional
+from dataclasses import dataclass, field
+
+import anthropic
+from tenacity import retry, stop_after_attempt, wait_random_exponential
+
+from agent.prompts import SYSTEM_PROMPT, CONCEPT_PRIOR_TEMPLATE, SKILL_INJECTION_TEMPLATE, build_skills_prompt
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolResult:
+    """Result from executing a tool."""
+    tool_name: str
+    tool_input: dict
+    output: str
+    duration_ms: float = 0.0
+
+
+@dataclass
+class AgentTrajectory:
+    """Complete trajectory of an agent run, for logging and evolution."""
+    image_id: str
+    concept_prior: str
+    steps: list = field(default_factory=list)
+    final_report: str = ""
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_duration_ms: float = 0.0
+
+
+class CXRReActAgent:
+    """
+    Zero-shot ReAct agent for CXR report generation.
+
+    Uses Claude Sonnet via Anthropic's native tool-use API to orchestrate
+    multiple CXR analysis models. The agent receives CLEAR concept priors
+    as structured context and iteratively calls tools to build a
+    comprehensive radiology report.
+
+    Analogous to mimic_skills' build_agent_executor_ZeroShot() but:
+    - Uses Anthropic tool-use instead of LangChain AgentExecutor
+    - ReAct loop is explicit (Thought in model text, Action via tool_use)
+    - No text-based action parsing needed (DiagnosisWorkflowParser equivalent is native)
+
+    Args:
+        model: Anthropic model name (default: claude-sonnet-4-6)
+        max_iterations: Maximum ReAct loop iterations (like mimic_skills' max_iterations=10)
+        max_tokens: Max tokens per agent response
+        temperature: Sampling temperature (0.0 for deterministic)
+        tools: List of tool instances (must implement .to_anthropic_schema() and .run())
+        skill_text: Optional evolved skill to inject into prompt (for future evotest)
+    """
+
+    def __init__(
+        self,
+        model: str = "claude-sonnet-4-6",
+        max_iterations: int = 10,
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        tools: list = None,
+        skill_text: Optional[str] = None,
+        api_key: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        use_skills: bool = True,
+    ):
+        self.client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+        self.model = model
+        self.max_iterations = max_iterations
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.tools = tools or []
+        self.skill_text = skill_text
+        # Adaptive thinking: "low", "medium", "high", or None to disable.
+        # Same pattern as mimic_skills models.py.
+        self.reasoning_effort = reasoning_effort
+        self.use_skills = use_skills
+
+        # Build tool schemas for Anthropic API
+        self._tool_schemas = [t.to_anthropic_schema() for t in self.tools]
+        # Map tool names to instances for execution
+        self._tool_map = {t.name: t for t in self.tools}
+
+    def _build_system_prompt(self, concept_prior_text: str) -> str:
+        """Build the full system prompt with skills, concept priors, and optional evolved skill.
+
+        Assembly order:
+        1. Base system prompt (role + principles)
+        2. Skill files (workflow, tool guidance, interpretation rules)
+        3. CLEAR concept prior for this specific image
+        4. Optional evolved skill text (for future evotest integration)
+        """
+        parts = [SYSTEM_PROMPT]
+
+        # Load skill files (clinical reasoning guidance)
+        if self.use_skills:
+            skills_text = build_skills_prompt()
+            if skills_text:
+                parts.append(skills_text)
+
+        if concept_prior_text:
+            parts.append(concept_prior_text)
+
+        # Evolved skill overrides/supplements the default skills
+        if self.skill_text:
+            parts.append(SKILL_INJECTION_TEMPLATE.format(skill_text=self.skill_text))
+
+        return "\n\n".join(parts)
+
+    def _execute_tool(self, tool_name: str, tool_input: dict) -> ToolResult:
+        """Execute a tool by name with given input.
+
+        Analogous to mimic_skills' AgentExecutor tool dispatch, but simpler
+        since Anthropic API provides structured tool_name and tool_input
+        (no regex parsing needed like DiagnosisWorkflowParser).
+        """
+        start_time = time.time()
+
+        tool = self._tool_map.get(tool_name)
+        if tool is None:
+            output = f"Error: Unknown tool '{tool_name}'. Available tools: {list(self._tool_map.keys())}"
+            logger.warning(output)
+        else:
+            try:
+                output = tool.run(**tool_input)
+                if output is None:
+                    output = "(tool returned no output)"
+            except Exception as e:
+                output = f"Error executing {tool_name}: {e}"
+                logger.error(output, exc_info=True)
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        return ToolResult(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            output=output,
+            duration_ms=duration_ms,
+        )
+
+    @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(10))
+    def _api_call(self, **kwargs) -> anthropic.types.Message:
+        """Make an Anthropic API call with retry and exponential backoff.
+
+        Adapted from mimic_skills' models.py:anthropic_completion_with_backoff()
+        which uses the same tenacity retry pattern for robustness against
+        transient API errors (rate limits, 500s, network timeouts).
+        """
+        return self.client.messages.create(**kwargs)
+
+    def run(
+        self,
+        image_path: str,
+        concept_prior_text: str = "",
+        image_id: str = "",
+    ) -> AgentTrajectory:
+        """
+        Run the ReAct agent to generate a CXR report.
+
+        This is the main entry point, analogous to mimic_skills'
+        agent_executor.invoke({"input": patient_history}).
+
+        The ReAct loop:
+        1. Send context + message history to Claude Sonnet
+        2. If response contains tool_use blocks: execute tools, append results
+        3. If response is end_turn (text only): extract final report
+        4. Repeat until final report or max_iterations
+
+        Args:
+            image_path: Path to the CXR image file
+            concept_prior_text: Formatted CLEAR concept scores for this image
+            image_id: Identifier for logging/trajectory tracking
+
+        Returns:
+            AgentTrajectory with full reasoning trace and final report
+        """
+        trajectory = AgentTrajectory(
+            image_id=image_id,
+            concept_prior=concept_prior_text,
+        )
+
+        system_prompt = self._build_system_prompt(concept_prior_text)
+
+        # Initial user message with the CXR image
+        messages = [
+            {
+                "role": "user",
+                "content": self._build_initial_message(image_path),
+            }
+        ]
+
+        start_time = time.time()
+
+        for iteration in range(self.max_iterations):
+            logger.info(f"Iteration {iteration + 1}/{self.max_iterations}")
+
+            # Call Claude Sonnet with tool definitions
+            # Adaptive thinking follows mimic_skills pattern: when enabled,
+            # use higher max_tokens and no temperature/system constraints.
+            if self.reasoning_effort:
+                api_kwargs = {
+                    "model": self.model,
+                    "max_tokens": 16000,
+                    "messages": messages,
+                    "system": system_prompt,
+                    "thinking": {"type": "adaptive"},
+                    "output_config": {"effort": self.reasoning_effort},
+                }
+            else:
+                api_kwargs = {
+                    "model": self.model,
+                    "max_tokens": self.max_tokens,
+                    "system": system_prompt,
+                    "messages": messages,
+                    "temperature": self.temperature,
+                }
+            if self._tool_schemas:
+                api_kwargs["tools"] = self._tool_schemas
+
+            response = self._api_call(**api_kwargs)
+
+            # Track token usage
+            trajectory.total_input_tokens += response.usage.input_tokens
+            trajectory.total_output_tokens += response.usage.output_tokens
+
+            # Process response content blocks
+            assistant_content = response.content
+            messages.append({"role": "assistant", "content": assistant_content})
+
+            # Check stop_reason for truncation
+            # Analogous to mimic_skills' stop word handling in models.py
+            if response.stop_reason == "max_tokens":
+                logger.warning(
+                    f"Response truncated (max_tokens={self.max_tokens}). "
+                    "Consider increasing max_tokens."
+                )
+                trajectory.steps.append({
+                    "iteration": iteration + 1,
+                    "type": "truncated_response",
+                    "stop_reason": response.stop_reason,
+                })
+
+            # Check if the model wants to use tools
+            tool_use_blocks = [b for b in assistant_content if b.type == "tool_use"]
+
+            if not tool_use_blocks:
+                # If truncated with no tool calls, the text is likely incomplete —
+                # ask the model to continue rather than treating garbage as final report
+                if response.stop_reason == "max_tokens":
+                    logger.warning("Truncated response with no tool calls, requesting continuation")
+                    messages.append({
+                        "role": "user",
+                        "content": "Your response was truncated. Please continue and complete your report.",
+                    })
+                    continue
+
+                # No tool calls — model is done reasoning, extract final report
+                text_blocks = [b for b in assistant_content if b.type == "text"]
+                final_text = "\n".join(b.text for b in text_blocks)
+                trajectory.final_report = final_text
+                trajectory.steps.append({
+                    "iteration": iteration + 1,
+                    "type": "final_report",
+                    "text": final_text,
+                })
+                logger.info("Agent produced final report")
+                break
+
+            # Execute each tool call and collect results
+            tool_results = []
+            for tool_block in tool_use_blocks:
+                result = self._execute_tool(tool_block.name, tool_block.input)
+                trajectory.steps.append({
+                    "iteration": iteration + 1,
+                    "type": "tool_call",
+                    "tool_name": result.tool_name,
+                    "tool_input": result.tool_input,
+                    "tool_output": result.output,
+                    "duration_ms": result.duration_ms,
+                })
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_block.id,
+                    "content": result.output,
+                })
+
+            # Append tool results as user message (Anthropic API convention)
+            messages.append({"role": "user", "content": tool_results})
+
+            # Log thinking blocks (adaptive thinking) and reasoning text
+            thinking_blocks = [b for b in assistant_content if b.type == "thinking"]
+            if thinking_blocks:
+                thinking_text = "\n".join(b.thinking for b in thinking_blocks)
+                logger.debug(f"Agent thinking: {thinking_text[:300]}...")
+                trajectory.steps.append({
+                    "iteration": iteration + 1,
+                    "type": "thinking",
+                    "text": thinking_text,
+                })
+
+            text_blocks = [b for b in assistant_content if b.type == "text"]
+            if text_blocks:
+                reasoning = "\n".join(b.text for b in text_blocks)
+                logger.info(f"Agent reasoning: {reasoning[:200]}...")
+
+        else:
+            # Max iterations reached without final report
+            # Force extraction from last response (analogous to mimic_skills'
+            # truncation + forced diagnosis in _construct_scratchpad Tier 2)
+            logger.warning(f"Max iterations ({self.max_iterations}) reached, forcing report extraction")
+            trajectory.steps.append({
+                "iteration": self.max_iterations,
+                "type": "max_iterations_reached",
+            })
+            if not trajectory.final_report:
+                trajectory.final_report = self._force_final_report(
+                    messages, system_prompt, trajectory
+                )
+
+        trajectory.total_duration_ms = (time.time() - start_time) * 1000
+        return trajectory
+
+    def _build_initial_message(self, image_path: str) -> list:
+        """Build the initial user message with CXR image and instructions.
+
+        Analogous to mimic_skills' "Patient History: {input}" in the prompt,
+        but includes the actual image for multimodal models.
+        """
+        content = []
+
+        # Add the CXR image if path provided
+        if image_path:
+            _SUPPORTED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+            mime_type = mimetypes.guess_type(image_path)[0]
+            if mime_type not in _SUPPORTED_MIME_TYPES:
+                # DICOM (.dcm) returns 'application/dicom', unknown extensions return None
+                # Default to PNG which is the most common CXR format
+                logger.warning(
+                    f"MIME type '{mime_type}' for {image_path} not supported by Anthropic API, "
+                    f"defaulting to image/png. Supported: {_SUPPORTED_MIME_TYPES}"
+                )
+                mime_type = "image/png"
+            with open(image_path, "rb") as f:
+                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": mime_type,
+                    "data": image_data,
+                },
+            })
+
+        # Add the task instruction
+        content.append({
+            "type": "text",
+            "text": (
+                "Please analyze this chest X-ray and generate a comprehensive radiology report. "
+                "Use the available tools to gather information from specialized CXR models, "
+                "then synthesize your findings into a final report with FINDINGS and IMPRESSION sections.\n\n"
+                "When you have gathered sufficient information from the tools, stop calling tools "
+                "and provide your final synthesized report directly."
+            ),
+        })
+
+        return content
+
+    def _force_final_report(
+        self,
+        messages: list,
+        system_prompt: str,
+        trajectory: AgentTrajectory,
+    ) -> str:
+        """Force the agent to produce a final report when max iterations reached.
+
+        Analogous to mimic_skills' truncation strategy in
+        _construct_scratchpad() Tier 2 where the agent is forced to provide
+        "Final Diagnosis and Treatment" when context overflows.
+        """
+        messages_copy = list(messages)
+        messages_copy.append({
+            "role": "user",
+            "content": (
+                "You have used all available tool calls. Based on all the information "
+                "gathered so far, please synthesize your final radiology report now. "
+                "Include FINDINGS and IMPRESSION sections."
+            ),
+        })
+
+        force_kwargs = {
+            "model": self.model,
+            "system": system_prompt,
+            "messages": messages_copy,
+        }
+        if self.reasoning_effort:
+            force_kwargs["max_tokens"] = 16000
+            force_kwargs["thinking"] = {"type": "adaptive"}
+            force_kwargs["output_config"] = {"effort": self.reasoning_effort}
+        else:
+            force_kwargs["max_tokens"] = self.max_tokens
+            force_kwargs["temperature"] = self.temperature
+
+        response = self._api_call(**force_kwargs)
+
+        # Track tokens for forced report (was missing before)
+        trajectory.total_input_tokens += response.usage.input_tokens
+        trajectory.total_output_tokens += response.usage.output_tokens
+
+        text_blocks = [b for b in response.content if b.type == "text"]
+        return "\n".join(b.text for b in text_blocks)

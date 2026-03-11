@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environments
+.venv/
+venv/
+env/
+*.conda
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs and outputs
+logs/
+results/
+trajectories/
+*.log
+
+# Model weights and large files
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+*.h5
+*.hdf5
+
+# Reference code (not part of the agent)
+tmp/
+
+# CLEAR vocab (large compressed file, ships with repo)
+# clear/bpe_simple_vocab_16e6.txt.gz — keep tracked
+
+# Secrets
+.env
+*.key

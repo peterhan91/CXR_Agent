@@ -1,0 +1,93 @@
+# CXR Agent Configuration
+
+# Agent settings
+agent:
+  model: "claude-sonnet-4-6"
+  max_iterations: 10
+  max_tokens: 4096
+  temperature: 0.0
+  reasoning_effort: "medium"  # "low", "medium", "high", or null to disable
+
+# CLEAR concept prior settings
+clear:
+  model_path: null  # null = auto-detect from ../cxr_concept/checkpoints/
+  concepts_path: null  # null = auto-detect from ../cxr_concept/concepts/
+  dinov2_model_name: "dinov2_vitb14"
+  image_resolution: 448
+  top_k: 20  # number of top concepts to include in prior
+
+# Tool settings — all loaded by default, Sonnet decides which to use per image
+tools:
+  # Report generators
+  chexagent2:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexagent2_srrg:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexone:
+    enabled: true
+    endpoint: "http://localhost:8002"
+  medversa:
+    enabled: true
+    endpoint: "http://localhost:8004"
+
+  # Classification
+  chexagent2_classify:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  medversa_classify:
+    enabled: true
+    endpoint: "http://localhost:8004"
+
+  # Grounding / Detection
+  chexagent2_grounding:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  medversa_detect:
+    enabled: true
+    endpoint: "http://localhost:8004"
+
+  # VQA
+  chexagent2_vqa:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  medversa_vqa:
+    enabled: true
+    endpoint: "http://localhost:8004"
+
+  # Segmentation
+  biomedparse:
+    enabled: true
+    endpoint: "http://localhost:8005"
+  medsam3:
+    enabled: true
+    endpoint: "http://localhost:8006"
+  medversa_segment:
+    enabled: true
+    endpoint: "http://localhost:8004"
+
+  # Verification
+  factchexcker:
+    enabled: true
+    endpoint: "http://localhost:8007"
+
+# Skill injection (for future evotest integration)
+# No built-in skills — Sonnet decides workflow via ReAct + tool descriptions.
+# Evolved skills from evotest can be injected via path.
+skill:
+  enabled: false
+  path: null  # path to evolved skill markdown file
+  inject: "system"  # "system", "examples", or "both"
+
+# Data paths
+data:
+  mimic_h5: null  # path to MIMIC CXR HDF5 file
+  mimic_csv: null  # path to MIMIC reports CSV
+  output_dir: "results/"
+
+# Logging
+logging:
+  level: "INFO"
+  save_trajectories: true
+  trajectory_dir: "trajectories/"
