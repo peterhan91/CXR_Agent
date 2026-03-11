@@ -196,25 +196,23 @@ CLEAR runs in-process on whichever GPU the agent process uses (CPU also works, ~
 
 ## Next Steps
 
-### GPU server setup — March 11
+### March 11 — Setup + Eval
 
-1. **Clone external repos** (MedVersa, BiomedParse, MedSAM3, FactCheXcker) — see `scripts/validate_models/GPU_SERVER_SETUP.md`
-2. **Install environments** — base conda env + per-model deps from `envs/*.txt`
-3. **Download model weights** — HuggingFace models auto-download on first use; CLEAR checkpoint is manual
-4. **Validate each model** — `python scripts/validate_models/validate_all.py`
-5. **Launch all 6 servers** — `bash scripts/launch_servers.sh` and verify health endpoints
-6. **Smoke test the agent** — `python scripts/run_agent.py --image /path/to/test_cxr.png`
+**Server setup:**
+1. Clone external repos (MedVersa, BiomedParse, MedSAM3, FactCheXcker) — see `scripts/validate_models/GPU_SERVER_SETUP.md`
+2. Install environments — base conda env + per-model deps from `envs/*.txt`
+3. Download model weights — HuggingFace auto-downloads; CLEAR checkpoint is manual
+4. Validate each model — `python scripts/validate_models/validate_all.py`
+5. Launch all 6 servers — `bash scripts/launch_servers.sh`, verify health endpoints
+6. Smoke test — `python scripts/run_agent.py --image /path/to/test_cxr.png`
 
-### MIMIC-CXR evaluation: CheXOne (baseline) vs. CXR Agent — March 12
-
-Goal: compare reports from CheXOne alone vs. full agent on the MIMIC-CXR test set using ReXrank metrics.
-
-1. **Prepare MIMIC-CXR test split** — extract test image paths + ground truth reports (FINDINGS + IMPRESSION) into a JSON
-2. **Run CheXOne baseline** — for each test image, call CheXOne server directly (no agent, no CLEAR prior), save generated reports
-3. **Run CXR Agent** — for each test image, run the full agent pipeline (`run_agent.py`), save generated reports
-4. **Install [CXR-Report-Metric](https://github.com/rajpurkarlab/CXR-Report-Metric)** — computes all ReXrank metrics
-5. **Score both** — compute RadCliQ-v1 (primary), RadGraph-F1, SembScore, BERTScore, BLEU-2 for baseline and agent
-6. **Compare** — side-by-side metric table, per-study analysis of where the agent helps vs. hurts
+**MIMIC-CXR evaluation (CheXOne baseline vs. CXR Agent):**
+7. Prepare MIMIC-CXR test split — image paths + ground truth reports (FINDINGS + IMPRESSION) as JSON
+8. Run CheXOne baseline — call CheXOne server directly, no agent, no CLEAR prior
+9. Run CXR Agent — full pipeline via `run_agent.py`
+10. Install [CXR-Report-Metric](https://github.com/rajpurkarlab/CXR-Report-Metric) — computes all ReXrank metrics
+11. Score both — RadCliQ-v1 (primary), RadGraph-F1, SembScore, BERTScore, BLEU-2
+12. Compare — side-by-side metric table
 
 Deliverable: `scripts/eval_mimic.py` with `--mode chexone` (baseline) and `--mode agent` (ours).
 
