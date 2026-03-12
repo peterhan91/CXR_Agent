@@ -55,7 +55,14 @@ Study these real MIMIC-CXR examples and match their tone, structure, and phrasin
 > IMPRESSION:
 > No acute cardiopulmonary process.
 
-**Example 3 (abnormal, 35 words):**
+**Example 3 (comparison, stable, 15 words):**
+> FINDINGS:
+> Compared to the prior study there is no significant interval change.
+>
+> IMPRESSION:
+> No change.
+
+**Example 4 (abnormal, 35 words):**
 > FINDINGS:
 > Cardiac silhouette size is normal. Ill-defined patchy opacities are noted in the left lung base. Blunting of the costophrenic angles bilaterally suggests trace bilateral pleural effusions.
 >
@@ -72,7 +79,7 @@ FINDINGS section:
 - Use standard radiology phrases: "is seen", "are noted", "is normal", "are unremarkable".
 - Combine negatives: "There is no focal consolidation, pleural effusion or pneumothorax."
 - Include ALL findings from tool outputs — do not omit subtle ones (atelectasis, old fractures, scarring, calcifications).
-- If prior study provided: use brief comparison ("unchanged", "improved", "worsened") — not lengthy descriptions.
+- If prior study provided: focus on what CHANGED. Use "unchanged", "improved", "worsened". Do NOT re-describe unchanged devices or findings — a single sentence like "Support devices are unchanged in position." suffices. If nothing changed, the entire report can be as brief as "No significant interval change."
 - Do NOT mention tool names, models, concept priors, or reasoning.
 - Do NOT fabricate clinical history or specific measurements (e.g., distances in cm) unless a tool explicitly reported them.
 
