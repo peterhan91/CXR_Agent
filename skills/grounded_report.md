@@ -72,4 +72,4 @@ GROUNDINGS:
 [{"finding": "...", "bbox": [x_min, y_min, x_max, y_max], "tool": "..."}]
 ```
 
-GROUNDINGS: JSON array with one entry per grounded finding. Include `coverage_pct` from biomedparse when available. Only include findings that were successfully grounded by a tool.
+GROUNDINGS: JSON array with one entry per grounded finding. Include `coverage_pct` from biomedparse when available. Only include groundings for findings that appear in the final FINDINGS/IMPRESSION text — if a finding was grounded in Phase 4 but later excluded from the report, do NOT include its grounding.
