@@ -68,18 +68,18 @@ FINDINGS section:
 - Write 2-4 sentences of plain prose. No bullets, no headers, no markdown.
 - Do NOT start with technique ("PA view of the chest", "AP radiograph") — jump straight to findings.
 - Start with cardiac/mediastinal assessment, then lungs, then other.
-- IMPORTANT: Use "There is..." / "There is no..." phrasing for stating/negating findings (e.g., "There is no pleural effusion.", "There is no pneumothorax."). This matches MIMIC-CXR style.
+- Prefer "There is..." / "There is no..." phrasing for stating/negating findings (e.g., "There is no pleural effusion.", "There is no pneumothorax."). This matches standard MIMIC-CXR dictation style.
 - Use standard radiology phrases: "is seen", "are noted", "is normal", "are unremarkable".
 - Combine negatives: "There is no focal consolidation, pleural effusion or pneumothorax."
 - Include ALL findings from tool outputs — do not omit subtle ones (atelectasis, old fractures, scarring, calcifications).
 - If prior study provided: use brief comparison ("unchanged", "improved", "worsened") — not lengthy descriptions.
 - Do NOT mention tool names, models, concept priors, or reasoning.
-- Do NOT fabricate clinical history.
+- Do NOT fabricate clinical history or specific measurements (e.g., distances in cm) unless a tool explicitly reported them.
 
 IMPRESSION section:
 - 1 sentence. If normal: "No acute cardiopulmonary process." If abnormal: state key finding(s).
 
-**STRICT LENGTH: FINDINGS must be 20-45 words. IMPRESSION must be 3-10 words. Total MUST NOT exceed 55 words. Count your words before outputting. If over 55, cut the least important sentence.**
+**LENGTH: Match the natural length of a real MIMIC-CXR report. Normal studies are short (~20-30 words). Complex cases with multiple findings or devices may be longer (~40-70 words). Do NOT pad short reports or truncate complex ones. IMPRESSION is always 1 sentence.**
 
 ### Output Format
 ```

@@ -5,3 +5,4 @@ commit	1/radcliq_v1	radgraph_f1	semb_score	bertscore_f1	bleu_2	ratescore	green_s
 20bdf9b	0.7605	0.1988	0.5113	0.2296	0.1541	0.5817	0.4657	keep	iter2: tighten to 25-60 words, remove technique preamble, all 12 tools used
 d67ff9e	0.8511	0.2362	0.5713	0.2500	0.1534	0.5967	0.4135	keep	iter3: strict 55-word max, avg 46.7 words (GT=48.6). 6/7 beat CheXOne
 f119182	0.8077	0.2214	0.5317	0.2468	0.1470	0.6062	0.4954	revert	iter4: +medgemma_report Phase1. GREEN↑0.08 RaTE↑0.01 but 5/7 regressed. 6/7 beat CheXOne
+c42f18f	0.8008	0.2173	0.5248	0.2476	0.1937	0.6180	0.4585	keep	iter5: "There is/is no" phrasing. BLEU-2 0.15→0.19! 7/7 beat CheXOne → GRADUATE
