@@ -199,7 +199,7 @@ async def health():
 @app.post("/generate_report", response_model=ReportResponse)
 async def generate_report(req: ReportRequest):
     _, output_text, gen_time = _generate(
-        req.image_path, req.context, req.prompt, req.modality, "report generation",
+        req.image_path, req.context, req.prompt, req.modality, "report",
     )
     return ReportResponse(report=output_text, generation_time_ms=gen_time)
 
