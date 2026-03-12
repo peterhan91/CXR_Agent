@@ -18,11 +18,10 @@ Call all three report generators. Each provides a different clinical perspective
 4. `chexzero_classify` — CheXzero zero-shot 14-label screening. Record all labels marked PRESENT.
 5. `cxr_foundation_classify` — CXR Foundation zero-shot 14-label screening. Record all labels marked PRESENT.
 
-## Phase 3: Confirm Suspected Findings (1-4 calls)
+## Phase 3: Confirm Suspected Findings (1-3 calls)
 For each finding flagged positive by Phase 1 reports OR Phase 2 screening:
 6. `chexagent2_classify` with `task="binary_disease"`, `disease_name="<finding>"` — binary confirmation.
 7. If Phase 1 reports disagree on a finding, call `chexagent2_vqa` with a direct yes/no question (e.g., "Is there a pleural effusion?").
-8. Use `medgemma_vqa` for a second-opinion VQA when classifiers are split (e.g., "Does this chest X-ray show cardiomegaly?").
 
 Decision rule:
 - INCLUDE a finding if at least 2 of 3 classifiers agree (chexzero, cxr_foundation, chexagent2_classify).
@@ -85,9 +84,13 @@ FINDINGS section:
 - Do NOT fabricate clinical history or specific measurements (e.g., distances in cm) unless a tool explicitly reported them.
 
 IMPRESSION section:
-- 1 sentence. If normal: "No acute cardiopulmonary process." If abnormal: state key finding(s).
+- Exactly 1 sentence, ≤10 words. If normal: "No acute cardiopulmonary process." If abnormal: state only the single most important finding. Never list multiple findings in IMPRESSION — that belongs in FINDINGS.
 
-**LENGTH: Be concise. Real MIMIC-CXR reports average ~45 words total. Normal studies: ~20-30 words. Abnormal with multiple findings: ~40-70 words. Avoid verbose descriptions — state findings directly without elaboration. IMPRESSION is always 1 sentence.**
+Comparison studies:
+- If tools and reports indicate no significant change since prior: write ONLY "Compared to the prior study there is no significant interval change." for FINDINGS and "No change." for IMPRESSION. Do NOT enumerate stable findings individually.
+- When describing interval changes, use "unchanged", "stable", or "persistent" unless tool outputs explicitly describe a direction of change. Do NOT guess at "worsened" or "improved" — incorrect change direction is worse than neutral phrasing.
+
+**LENGTH: Be concise. Real MIMIC-CXR reports average ~45 words total. Normal studies: ~20-30 words. Abnormal with multiple findings: ~40-70 words. Comparison studies with no change: ~15 words. State findings directly without elaboration.**
 
 ### Output Format
 ```
