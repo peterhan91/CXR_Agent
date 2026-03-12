@@ -466,7 +466,7 @@ def run_medversa(args):
     output_dir = Path(args.output)
     test_set = _load_test_set(output_dir)
 
-    endpoint = "http://localhost:8003"
+    endpoint = "http://localhost:8004"
     predictions_path = output_dir / "predictions_medversa.json"
 
     existing = _load_existing_predictions(predictions_path)
