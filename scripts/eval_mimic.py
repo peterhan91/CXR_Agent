@@ -1169,7 +1169,7 @@ Examples:
     )
     parser.add_argument(
         "--config",
-        default="configs/config.yaml",
+        default="configs/config_grounded.yaml",
         help="Agent config YAML (for agent mode)",
     )
 

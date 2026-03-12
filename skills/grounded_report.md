@@ -79,7 +79,7 @@ FINDINGS section:
 - Use standard radiology phrases: "is seen", "are noted", "is normal", "are unremarkable".
 - Combine negatives: "There is no focal consolidation, pleural effusion or pneumothorax."
 - Include ALL findings from tool outputs — do not omit subtle ones (atelectasis, old fractures, scarring, calcifications).
-- If prior study provided: focus on what CHANGED. Use "unchanged", "improved", "worsened". Do NOT re-describe unchanged devices or findings — a single sentence like "Support devices are unchanged in position." suffices. If nothing changed, the entire report can be as brief as "No significant interval change."
+- **COMPARISON OVERRIDE**: If a prior study is provided AND Phase 1 reports use "unchanged"/"stable"/"no change" language, this rule takes PRIORITY over individual finding enumeration. Focus ONLY on what changed. Summarize stable findings in one sentence (e.g., "Bilateral opacities and effusions are unchanged.") rather than describing each one. If nothing changed, write only "No significant interval change."
 - Do NOT mention tool names, models, concept priors, or reasoning.
 - Do NOT fabricate clinical history or specific measurements (e.g., distances in cm) unless a tool explicitly reported them.
 
