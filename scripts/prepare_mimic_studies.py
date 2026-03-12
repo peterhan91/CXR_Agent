@@ -355,6 +355,10 @@ def load_reports(mimic_cxr_dir: Path, studies_df: pd.DataFrame) -> dict:
     """
     logger.info("Phase 2: Loading CXR reports...")
     reports_base = mimic_cxr_dir / "files"
+    # Reports may live under reports/files/ in mimic-cxr-jpg layout
+    alt_reports_base = mimic_cxr_dir / "reports" / "files"
+    if not any(reports_base.glob("p*/p*/*.txt")) and alt_reports_base.exists():
+        reports_base = alt_reports_base
     reports = {}
     missing = 0
 
@@ -418,6 +422,9 @@ def build_prior_index(
     logger.info(f"  All frontal studies for target subjects: {len(all_studies)}")
 
     reports_base = mimic_cxr_dir / "files"
+    alt_reports_base = mimic_cxr_dir / "reports" / "files"
+    if not any(reports_base.glob("p*/p*/*.txt")) and alt_reports_base.exists():
+        reports_base = alt_reports_base
     prior_index = {}
 
     for _, row in all_studies.iterrows():

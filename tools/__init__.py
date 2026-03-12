@@ -22,6 +22,7 @@ from tools.biomedparse import BiomedParseSegmentTool
 from tools.medsam import MedSAMSegmentTool
 from tools.medsam3 import MedSAM3SegmentTool
 from tools.factchexcker import FactCheXckerVerifyTool
+from tools.medgemma import MedGemmaVQATool, MedGemmaReportTool
 
 __all__ = [
     "BaseCXRTool",
@@ -36,6 +37,9 @@ __all__ = [
     # Zero-shot classification
     "CheXzeroClassifyTool",
     "CXRFoundationClassifyTool",
+    # MedGemma (VQA + report)
+    "MedGemmaVQATool",
+    "MedGemmaReportTool",
     # MedVersa (multi-task) — broken, kept for reference
     "MedVersaReportTool",
     "MedVersaClassifyTool",

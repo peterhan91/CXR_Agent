@@ -24,13 +24,13 @@ Per study, output: report text (FINDINGS + IMPRESSION), grounded findings (JSON 
 
 Before starting the experiment loop, complete these steps in order:
 
-### Step 1: Verify tool servers (10 active)
+### Step 1: Verify tool servers (12 active)
 
 Every tool server must respond. Send a health-check request to each:
 
 ```bash
 # Quick health check — all should return 200
-for port in 8001 8002 8005 8007 8008 8009; do
+for port in 8001 8002 8005 8007 8008 8009 8010; do
   echo -n "Port $port: "; curl -sf http://localhost:$port/health && echo "OK" || echo "FAIL"
 done
 ```
@@ -43,14 +43,18 @@ done
 | `chexagent2_classify` | :8001 | Binary disease classification (`task=binary_disease`, `disease_name="..."`) |
 | `chexagent2_vqa` | :8001 | Follow-up questions |
 | `chexone_report` | :8002 | Second-opinion report (Qwen2.5-VL) |
+| `medgemma_vqa` | :8010 | Clinical VQA using MedGemma (Google 4B medical VLM) |
+| `medgemma_report` | :8010 | Third-opinion report using MedGemma |
 | `chexzero_classify` | :8009 | CheXzero zero-shot 14-label screening (CLIP ViT-B/32 + logit_scale) |
 | `cxr_foundation_classify` | :8008 | Google CXR Foundation zero-shot 14-label screening (ELIXR v2, CPU) |
 | `biomedparse_segment` | :8005 | Text-prompted segmentation (`prompts=["left lung"]`; good for anatomy, not pathology) |
-| `factchexcker_verify` | :8007 | Report hallucination checker |
+| `factchexcker_verify` | :8007 | ETT/carina position verification (LLM-based pipeline with CarinaNet) |
 
 Plus **CLEAR concept prior** — DINOv2+CLIP cosine similarity to MIMIC-CXR concepts, injected before tool calls.
 
 **Disabled**: MedVersa (hallucinating), MedSAM (poor CXR masks), MedSAM3 (replaced).
+
+**Note on FactCheXcker**: The full pipeline verifies ETT/carina positioning only (config limited to ETT/carina objects). For general finding verification (effusions, cardiomegaly, etc.), use the two 14-label classifiers (CheXzero + CXR Foundation) and MedGemma VQA for cross-checking.
 
 ### Step 2: Validate FactCheXcker actually catches errors
 
@@ -58,12 +62,12 @@ FactCheXcker must detect real inconsistencies — not just rubber-stamp every re
 
 ```bash
 # Send a known-bad report for a normal CXR image
-curl -X POST http://localhost:8007/verify \
+curl -X POST http://localhost:8007/verify_report \
   -H "Content-Type: application/json" \
-  -d '{"image_path": "<any_val_cxr_image>", "report": "Large bilateral pleural effusions with complete left lung opacification. Massive cardiomegaly. Multiple bilateral pulmonary nodules suspicious for metastatic disease."}'
+  -d '{"image_path": "<any_val_cxr_image>", "report": "Endotracheal tube tip is 2 cm above the carina."}'
 ```
 
-**Expected**: FactCheXcker should flag inconsistencies (e.g., "no evidence of pleural effusion"). If it returns "all findings verified" for an obviously wrong report on a normal CXR, the tool is broken — investigate before proceeding. Also test with a correct report for the same image to confirm it passes.
+**Expected**: FactCheXcker should return `changes_made: true` and correct the ETT distance. If it returns `changes_made: false`, the full pipeline is not loaded — check `full_pipeline` in the health response. Also test with a report that has no ETT claims to confirm it passes unchanged.
 
 ### Step 3: Verify ReXrank scoring services
 
@@ -71,13 +75,13 @@ All 7 metrics must be computable. Test with a small dummy run:
 
 ```bash
 # Verify CXR-Report-Metric (5 core metrics: BLEU-2, BERTScore, SembScore, RadGraph, RadCliQ-v1)
-conda run -n radgraph python -c "from CXRMetric.run_eval import calc_metric; print('CXR-Report-Metric OK')"
+cd ../ReXrank-metric/scripts/CXR-Report-Metric && conda run -n radgraph python -c "from CXRMetric.run_eval import calc_metric; print('CXR-Report-Metric OK')"
 
 # Verify RaTEScore
 conda run -n green_score python -c "from RaTEScore import RaTEScore; print('RaTEScore OK')"
 
 # Verify GREEN (loads 7B model — takes ~30s first time)
-conda run -n green_score python -c "from green_score.green import GREEN; print('GREEN OK')"
+cd ../GREEN && conda run -n green_score python -c "from green_score.green import GREEN; print('GREEN OK')"
 ```
 
 If any fail, fix the conda environment before proceeding. Scoring with missing metrics is not acceptable.
@@ -93,7 +97,7 @@ ls results/eval_enriched/val_studies_enriched.json results/eval_enriched/test_st
 # If missing, generate it (requires MIMIC-IV access):
 python scripts/prepare_mimic_studies.py \
   --mimic_cxr_dir $MIMIC \
-  --mimic_iv_dir /path/to/mimiciv/3.1 \
+  --mimic_iv_dir /home/than/physionet.org/files/mimiciv/3.1 \
   --output results/eval_enriched/ \
   --splits validate,test
 ```
@@ -144,13 +148,13 @@ Once all 6 steps pass, begin the experiment loop.
 - `agent/react_agent.py` — ReAct loop, iteration count, tool selection strategy.
 - `configs/config_grounded.yaml` — tool enablement, temperature, max_iterations.
 - `skills/*.md` — clinical reasoning skills injected into the system prompt.
+- `scripts/eval_mimic.py` — evaluation harness. Scoring logic is frozen; CLI flags and tool registration are OK to add.
+- `scripts/prepare_mimic_studies.py` — enriched data preparation.
 
 ## What you CANNOT modify
 
-- `scripts/eval_mimic.py` — evaluation harness. Scoring logic is frozen; CLI flags are OK to add.
-- `tools/*.py` and `servers/*.py` — tool and server implementations.
+- `tools/*.py` and `servers/*.py` — existing tool and server implementations (adding new ones is OK).
 - `clear/` — CLEAR concept scorer.
-- `scripts/prepare_mimic_studies.py` — enriched data preparation.
 
 ## Data splits
 
@@ -206,9 +210,10 @@ LOOP FOREVER:
    - "Low BLEU-2 → wording diverges from radiology conventions → add style examples"
    - "Low RaTEScore → temporal/factual inconsistencies → strengthen FactCheXcker usage"
    - "Low GREEN → clinical errors (missed/false findings) → add more cross-checking between tools"
-   - "Agent not using enough tools → add explicit instructions to call all 10"
+   - "Agent not using enough tools → add explicit instructions to call all 12"
    - "FactCheXcker always says OK → revise how the agent feeds the draft report"
    - "Prior study context not reflected → ensure skill references prior when available"
+   - "Use MedGemma VQA to verify uncertain findings before finalizing report"
 3. Implement: edit `agent/prompts.py`, `skills/*.md`, `configs/config_grounded.yaml`, or `agent/react_agent.py`.
 4. git commit.
 5. Run on VALIDATION:
@@ -268,10 +273,31 @@ For subsequent auto-graduation runs, copy test_set.json + baseline files into `r
 ## Reference
 
 - **MIMIC-CXR-JPG**: `/home/than/physionet.org/files/mimic-cxr-jpg/2.0.0/`
+- **MIMIC-IV**: `/home/than/physionet.org/files/mimiciv/3.1/`
 - **Config**: `configs/config_grounded.yaml`
 - **Skill file**: `skills/grounded_report.md`
 - **Enriched data**: `results/eval_enriched/val_studies_enriched.json`, `test_studies_enriched.json`
-- **GPU 0**: CheXagent-2 (18.6GB) | **GPU 1**: CheXOne + CheXzero(:8009) + BiomedParse | **GPU 2**: FactCheXcker + eval | **CPU**: CXR Foundation(:8008)
-- **Conda envs**: `cxr_agent` (main), `cxr_chexagent2`, `radgraph` (eval step 1: CXR-Report-Metric), `green_score` (eval steps 2-3: RaTEScore + GREEN)
+- **GPU 0**: CheXagent-2 (18.6GB) | **GPU 1**: CheXOne + CheXzero(:8009) + BiomedParse | **GPU 2**: MedGemma(:8010, 8GB) + FactCheXcker + eval | **CPU**: CXR Foundation(:8008)
+- **Conda envs**: `cxr_agent` (main, torch 2.6+cu124), `cxr_chexagent2`, `radgraph` (eval step 1: CXR-Report-Metric), `green_score` (eval steps 2-3: RaTEScore + GREEN)
 - **ReXrank-metric**: `../ReXrank-metric/` — orchestration scripts for all 7 metrics
+- **FactCheXcker**: `../FactCheXcker/` — LLM backend uses OpenAI API (OPENAI_API_KEY env var), verifies ETT/carina only
 - **Server safety**: shared GPU server. Never delete outside `CXR_Agent/`, never touch other envs, never kill others' processes.
+
+## Server startup commands
+
+```bash
+# GPU 0: CheXagent-2
+conda run -n cxr_chexagent2 python servers/chexagent2_server.py --port 8001
+
+# GPU 1: CheXOne + BiomedParse + CheXzero
+CUDA_VISIBLE_DEVICES=1 python servers/chexone_server.py --port 8002
+CUDA_VISIBLE_DEVICES=1 python servers/biomedparse_server.py --port 8005
+CUDA_VISIBLE_DEVICES=1 python servers/chexzero_server.py --port 8009
+
+# GPU 2: MedGemma + FactCheXcker
+CUDA_VISIBLE_DEVICES=2 python servers/medgemma_server.py --port 8010
+OPENAI_API_KEY="..." WANDB_MODE=disabled CUDA_VISIBLE_DEVICES=2 python servers/factchexcker_server.py --port 8007 --factchexcker_dir ../FactCheXcker
+
+# CPU: CXR Foundation
+python servers/cxr_foundation_server.py --port 8008
+```
