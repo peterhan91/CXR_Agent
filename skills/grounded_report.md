@@ -8,12 +8,11 @@ description: MIMIC-style CXR report generation optimized for RadCliQ-v1/RadGraph
 
 Execute these phases IN ORDER. Do not skip any mandatory step.
 
-## Phase 1: Collect Reports (4 calls — MANDATORY)
-Call all four report generators. Each provides a different clinical perspective.
+## Phase 1: Collect Reports (3 calls — MANDATORY)
+Call all three report generators. Each provides a different clinical perspective.
 1. `chexagent2_report` — free-text report
 2. `chexone_report` — second-opinion report
 3. `chexagent2_srrg_report` — structured region-by-region report
-4. `medgemma_report` — third-opinion report from MedGemma
 
 ## Phase 2: Screen All Pathologies (2 calls — MANDATORY)
 4. `chexzero_classify` — CheXzero zero-shot 14-label screening. Record all labels marked PRESENT.
@@ -49,9 +48,9 @@ Study these real MIMIC-CXR examples and match their tone, structure, and phrasin
 > IMPRESSION:
 > Normal chest.
 
-**Example 2 (normal, 25 words):**
+**Example 2 (normal, 27 words):**
 > FINDINGS:
-> Lungs are clear. No focal consolidation, pleural effusion or pneumothorax. Cardiomediastinal silhouette is normal. No acute osseous abnormalities identified.
+> The lungs are clear. There is no focal consolidation, pleural effusion or pneumothorax. The cardiomediastinal silhouette is normal. Pulmonary vascularity is normal.
 >
 > IMPRESSION:
 > No acute cardiopulmonary process.
@@ -69,8 +68,9 @@ FINDINGS section:
 - Write 2-4 sentences of plain prose. No bullets, no headers, no markdown.
 - Do NOT start with technique ("PA view of the chest", "AP radiograph") — jump straight to findings.
 - Start with cardiac/mediastinal assessment, then lungs, then other.
+- IMPORTANT: Use "There is..." / "There is no..." phrasing for stating/negating findings (e.g., "There is no pleural effusion.", "There is no pneumothorax."). This matches MIMIC-CXR style.
 - Use standard radiology phrases: "is seen", "are noted", "is normal", "are unremarkable".
-- Combine negatives to save words: "No focal consolidation, pleural effusion or pneumothorax."
+- Combine negatives: "There is no focal consolidation, pleural effusion or pneumothorax."
 - Include ALL findings from tool outputs — do not omit subtle ones (atelectasis, old fractures, scarring, calcifications).
 - If prior study provided: use brief comparison ("unchanged", "improved", "worsened") — not lengthy descriptions.
 - Do NOT mention tool names, models, concept priors, or reasoning.
