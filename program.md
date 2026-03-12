@@ -107,13 +107,13 @@ MIMIC=/home/than/physionet.org/files/mimic-cxr-jpg/2.0.0
 CFG=configs/config_grounded.yaml
 ENRICHED=results/eval_enriched/val_studies_enriched.json
 
-# Prepare validation set (20 unique patients, validate split) — if not done
+# Prepare validation set (10 unique patients, validate split) — if not done
 python scripts/eval_mimic.py --mode prepare --mimic_dir $MIMIC --reports_dir $MIMIC/reports \
-  --output results/eval_val/ --split validate --unique_patients --max_samples 20
+  --output results/eval_val/ --split validate --unique_patients --max_samples 10
 
-# Prepare test set (50 unique patients, test split) — if not done
+# Prepare test set (5 unique patients, test split) — if not done
 python scripts/eval_mimic.py --mode prepare --mimic_dir $MIMIC --reports_dir $MIMIC/reports \
-  --output results/eval_test/ --split test --unique_patients --max_samples 50
+  --output results/eval_test/ --split test --unique_patients --max_samples 5
 
 # Baselines on validation set (run once)
 python scripts/eval_mimic.py --mode sonnet --output results/eval_val/ --config $CFG
@@ -154,9 +154,9 @@ Once all 6 steps pass, begin the experiment loop.
 
 ## Data splits
 
-**Validation set** (`results/eval_val/test_set.json`): 20 unique patients from MIMIC-CXR `validate` split. Use this for ALL iterative optimization. Prepared with `--split validate --unique_patients --max_samples 20`.
+**Validation set** (`results/eval_val/test_set.json`): 10 unique patients from MIMIC-CXR `validate` split. Use this for ALL iterative optimization. Prepared with `--split validate --unique_patients --max_samples 10`.
 
-**Test set** (`results/eval_test/test_set.json`): 50 unique patients from MIMIC-CXR `test` split. Use ONLY for final evaluation or auto-graduation (see below). Prepared with `--split test --unique_patients --max_samples 50`.
+**Test set** (`results/eval_test/test_set.json`): 5 unique patients from MIMIC-CXR `test` split. Used for auto-graduation checkpoints (see below). Prepared with `--split test --unique_patients --max_samples 5`.
 
 **Important**: Both sets use `--unique_patients` (one study per patient via `drop_duplicates('subject_id')`) to avoid data leakage.
 
@@ -236,12 +236,12 @@ UCB tree search + Evolver LLM generates improved skills in `skills/evo/`. After 
 
 **Crashes**: If a run crashes, check the error. If it's a typo or easy fix, fix and re-run. If the idea is fundamentally broken, log `crash` in results.tsv, revert, and move on.
 
-**Timeout**: Each agent run on 20 validation CXRs should take ~20-60 minutes. If it exceeds 120 minutes, kill and discard.
+**Timeout**: Each agent run on 10 validation CXRs should take ~10-30 minutes. If it exceeds 60 minutes, kill and discard.
 
 **NEVER STOP**: Once the loop begins, do NOT pause to ask the human anything. Do NOT ask "should I continue?" or "is this good enough?". The human may be asleep. Continue indefinitely until manually interrupted. If you run out of ideas, think harder — re-read tool outputs, try combining approaches, try radical prompt changes, try different skill strategies. The loop runs until the human stops you.
 
 **Auto-graduation**: After each iteration, check if ALL 7 val metrics beat ALL baselines. When they do:
-1. Automatically run the 50-patient test set (see FINAL TEST below).
+1. Automatically run the 5-patient test set (see FINAL TEST below).
 2. Log test results to `results.tsv` with status `test`.
 3. **Keep iterating on val** — do NOT stop. The test run is a checkpoint, not a finish line. If a later iteration improves val further, run test again.
 
@@ -254,7 +254,7 @@ Triggered automatically by auto-graduation, or manually by the human. Uses the s
 ```bash
 ENRICHED_TEST=results/eval_enriched/test_studies_enriched.json
 
-# Run agent on 50-patient test set
+# Run agent on 5-patient test set
 python scripts/eval_mimic.py --mode agent --output results/eval_test/ --config $CFG \
   --use_prior --use_clinical_context --enriched_json $ENRICHED_TEST
 
