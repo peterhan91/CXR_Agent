@@ -481,9 +481,16 @@ def run_medversa(args):
 
         t0 = time.time()
         try:
+            # MedVersa needs context with indication and modality="cxr"
+            context = "Indication: Chest X-ray.\nComparison: None."
             resp = req_lib.post(
                 f"{endpoint}/generate_report",
-                json={"image_path": entry["image_path"]},
+                json={
+                    "image_path": entry["image_path"],
+                    "context": context,
+                    "prompt": "How would you characterize the findings from <img0>?",
+                    "modality": "cxr",
+                },
                 timeout=120,
             )
             resp.raise_for_status()
@@ -854,6 +861,8 @@ def score_predictions(args):
     test_set = _load_test_set(output_dir)
     gt_by_study = {e["study_id"]: e["report_gt"] for e in test_set}
 
+    eval_sections = getattr(args, "eval_sections", "full")
+
     # Find all prediction files
     pred_files = sorted(output_dir.glob("predictions_*.json"))
     if not pred_files:
@@ -862,7 +871,7 @@ def score_predictions(args):
 
     for pred_path in pred_files:
         mode_name = pred_path.stem.replace("predictions_", "")
-        logger.info(f"Scoring: {mode_name}")
+        logger.info(f"Scoring: {mode_name} (sections={eval_sections})")
 
         with open(pred_path) as f:
             preds = json.load(f)
@@ -874,10 +883,34 @@ def score_predictions(args):
 
         for p in preds:
             sid = p["study_id"]
-            if sid in gt_by_study and p.get("report_pred", "").strip():
-                study_ids.append(sid)
-                gt_reports.append(gt_by_study[sid])
-                pred_reports.append(p["report_pred"])
+            gt_full = gt_by_study.get(sid, "")
+            pred_full = p.get("report_pred", "").strip()
+            if not gt_full or not pred_full:
+                continue
+
+            gt_findings, gt_impression = parse_report_sections(gt_full)
+            pred_findings, pred_impression = parse_report_sections(pred_full)
+
+            if eval_sections == "findings":
+                # Only score findings — skip studies without GT findings
+                if not gt_findings:
+                    continue
+                gt_text = gt_findings
+                pred_text = pred_findings if pred_findings else pred_full
+            elif eval_sections == "impression":
+                # Only score impression — skip studies without GT impression
+                if not gt_impression:
+                    continue
+                gt_text = gt_impression
+                pred_text = pred_impression if pred_impression else pred_full
+            else:
+                # Full report (default)
+                gt_text = gt_full
+                pred_text = pred_full
+
+            study_ids.append(sid)
+            gt_reports.append(gt_text)
+            pred_reports.append(pred_text)
 
         if not study_ids:
             logger.warning(f"No valid predictions for {mode_name}, skipping")
@@ -886,13 +919,14 @@ def score_predictions(args):
         logger.info(f"  {len(study_ids)} studies with valid predictions")
 
         # Export CSVs for CXR-Report-Metric
-        gt_csv = output_dir / f"gt_{mode_name}.csv"
-        pred_csv = output_dir / f"pred_{mode_name}.csv"
+        suffix = f"_{eval_sections}" if eval_sections != "full" else ""
+        gt_csv = output_dir / f"gt_{mode_name}{suffix}.csv"
+        pred_csv = output_dir / f"pred_{mode_name}{suffix}.csv"
         _write_report_csv(gt_csv, study_ids, gt_reports)
         _write_report_csv(pred_csv, study_ids, pred_reports)
 
         # Try CXR-Report-Metric first, fall back to basic metrics
-        scores_path = output_dir / f"scores_{mode_name}.json"
+        scores_path = output_dir / f"scores_{mode_name}{suffix}.json"
         try:
             from CXRMetric.run_eval import calc_metric
 
@@ -1355,6 +1389,15 @@ Examples:
         "--chexone_endpoint",
         default="http://localhost:8002",
         help="CheXOne server URL (default: http://localhost:8002)",
+    )
+
+    # Score mode
+    parser.add_argument(
+        "--eval_sections",
+        default="full",
+        choices=["full", "findings", "impression"],
+        help="Which report sections to evaluate: full (default), findings-only, or impression-only. "
+        "Studies missing the selected section in GT are excluded.",
     )
 
     # Agent mode

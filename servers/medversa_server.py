@@ -174,7 +174,10 @@ async def lifespan(app: FastAPI):
     from utils import registry, generate_predictions
 
     model_cls = registry.get_model_class("medomni")
-    model = model_cls.from_pretrained("hyzhou/MedVersa").to(device).eval()
+    import os
+    from huggingface_hub import HfFolder
+    token = os.environ.get("HF_TOKEN", HfFolder.get_token())
+    model = model_cls.from_pretrained("hyzhou/MedVersa_Internal", token=token).to(device).eval()
 
     state["model"] = model
     state["generate_predictions"] = generate_predictions
