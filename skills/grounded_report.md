@@ -77,9 +77,10 @@ FINDINGS section:
 - Start with cardiac/mediastinal assessment, then lungs, then other.
 - Prefer "There is..." / "There is no..." phrasing for stating/negating findings (e.g., "There is no pleural effusion.", "There is no pneumothorax."). This matches standard MIMIC-CXR dictation style.
 - Use standard radiology phrases: "is seen", "are noted", "is normal", "are unremarkable".
+- Use standard radiology abbreviations: "ET tube" (not "endotracheal tube"), "NG tube" (not "nasogastric tube"), "SVC" (not "superior vena cava"), "IJ" (not "internal jugular"). Use "Heart size" or "Cardiac silhouette size" to describe cardiac size.
 - Combine negatives: "There is no focal consolidation, pleural effusion or pneumothorax."
 - Include ALL findings from tool outputs — do not omit subtle ones (atelectasis, old fractures, scarring, calcifications).
-- **COMPARISON OVERRIDE**: If a prior study is provided AND Phase 1 reports use "unchanged"/"stable"/"no change" language, this rule takes PRIORITY over individual finding enumeration. Focus ONLY on what changed. Summarize stable findings in one sentence (e.g., "Bilateral opacities and effusions are unchanged.") rather than describing each one. If nothing changed, write only "No significant interval change."
+- If prior study provided: focus on what CHANGED. Use "unchanged", "improved", "worsened". Do NOT re-describe unchanged devices or findings — a single sentence like "Support devices are unchanged in position." suffices. If nothing changed, the entire report can be as brief as "No significant interval change."
 - Do NOT mention tool names, models, concept priors, or reasoning.
 - Do NOT fabricate clinical history or specific measurements (e.g., distances in cm) unless a tool explicitly reported them.
 
