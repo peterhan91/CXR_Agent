@@ -1,5 +1,5 @@
 # CXR Agent Configuration — Grounded Report Generation
-# Active servers (9 tools): CheXagent-2 (5 tools), CheXOne, CheXzero, BiomedParse, FactCheXcker
+# Active servers (10 tools): CheXagent-2 (5), CheXOne, CheXzero, CXR Foundation, BiomedParse, FactCheXcker
 # Disabled: MedVersa (hallucinating), MedSAM (poor CXR quality), MedSAM3 (replaced)
 
 agent:
@@ -33,6 +33,9 @@ tools:
     enabled: true
     endpoint: "http://localhost:8001"
   chexzero:
+    enabled: true
+    endpoint: "http://localhost:8009"
+  cxr_foundation:
     enabled: true
     endpoint: "http://localhost:8008"
 

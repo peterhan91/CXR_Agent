@@ -1,26 +1,27 @@
-"""CheXzero zero-shot classification tool."""
+"""CXR Foundation (Google ELIXR v2) zero-shot classification tool."""
 
 import requests
 from tools.base import BaseCXRTool
 
 
-class CheXzeroClassifyTool(BaseCXRTool):
+class CXRFoundationClassifyTool(BaseCXRTool):
 
     def __init__(self, endpoint: str = "http://localhost:8008"):
         self.endpoint = endpoint
 
     @property
     def name(self) -> str:
-        return "chexzero_classify"
+        return "cxr_foundation_classify"
 
     @property
     def description(self) -> str:
         return (
-            "Zero-shot chest X-ray classification using CheXzero (CLIP fine-tuned on MIMIC-CXR). "
-            "Classifies an image for multiple pathologies using 10-model ensemble with majority vote. "
+            "Zero-shot chest X-ray classification using Google CXR Foundation (ELIXR v2). "
+            "Uses EfficientNet-L2 vision encoder + BERT text encoder with contrastive embeddings. "
+            "Classifies an image for multiple pathologies using natural language prompt pairs. "
             "Default: classifies all 14 CheXpert pathologies in one call. "
             "Returns binary present/absent for each pathology. "
-            "Use this for comprehensive multi-label screening — much faster than testing one disease at a time."
+            "Complements CheXzero — use both classifiers and compare for higher confidence."
         )
 
     @property
@@ -53,7 +54,7 @@ class CheXzeroClassifyTool(BaseCXRTool):
         resp = requests.post(
             f"{self.endpoint}/classify",
             json=payload,
-            timeout=60,
+            timeout=120,  # CXR Foundation is slower (CPU mode)
         )
         resp.raise_for_status()
         data = resp.json()
@@ -61,7 +62,7 @@ class CheXzeroClassifyTool(BaseCXRTool):
 
         present = [n for n, v in preds.items() if v == "present"]
         absent = [n for n, v in preds.items() if v == "absent"]
-        lines = [f"CheXzero 10-Model Ensemble (majority vote):"]
+        lines = ["CXR Foundation Zero-Shot Classification:"]
         if present:
             lines.append(f"  PRESENT: {', '.join(present)}")
         if absent:

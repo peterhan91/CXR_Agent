@@ -109,9 +109,15 @@ async def detect_carina(req: CarinaRequest):
     result = carinanet.predict_carina_ett(req.image_path)
     inference_time = (time.time() - t0) * 1000
 
+    # Convert tuples (x, y) to dicts {x, y} for Pydantic
+    carina_raw = result.get("carina")
+    ett_raw = result.get("ett")
+    carina = {"x": carina_raw[0], "y": carina_raw[1]} if isinstance(carina_raw, tuple) else carina_raw
+    ett = {"x": ett_raw[0], "y": ett_raw[1]} if isinstance(ett_raw, tuple) else ett_raw
+
     return CarinaResponse(
-        carina=result.get("carina"),
-        ett=result.get("ett"),
+        carina=carina,
+        ett=ett,
         inference_time_ms=inference_time,
     )
 

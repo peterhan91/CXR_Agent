@@ -14,25 +14,26 @@ Call all three report generators. Each provides a different clinical perspective
 2. `chexone_report` — second-opinion report
 3. `chexagent2_srrg_report` — structured region-by-region report
 
-## Phase 2: Screen All Pathologies (1 call — MANDATORY)
-4. `chexzero_classify` — zero-shot 14-label screening. Any label with P > 0.5 is positive. Record ALL positive and negative labels.
+## Phase 2: Screen All Pathologies (2 calls — MANDATORY)
+4. `chexzero_classify` — CheXzero zero-shot 14-label screening. Record all labels marked PRESENT.
+5. `cxr_foundation_classify` — CXR Foundation zero-shot 14-label screening. Record all labels marked PRESENT.
 
 ## Phase 3: Confirm Suspected Findings (1-3 calls)
 For each finding flagged positive by Phase 1 reports OR Phase 2 screening:
-5. `chexagent2_classify` with `task="binary_disease"`, `disease_name="<finding>"` — binary confirmation.
-6. If Phase 1 reports disagree on a finding, call `chexagent2_vqa` with a direct yes/no question (e.g., "Is there a pleural effusion?").
+6. `chexagent2_classify` with `task="binary_disease"`, `disease_name="<finding>"` — binary confirmation.
+7. If Phase 1 reports disagree on a finding, call `chexagent2_vqa` with a direct yes/no question (e.g., "Is there a pleural effusion?").
 
 Decision rule:
-- INCLUDE a finding only if at least one classifier (chexzero OR chexagent2_classify) confirms it.
-- EXCLUDE if both classifiers say no, even if a report mentions it.
+- INCLUDE a finding if at least 2 of 3 classifiers agree (chexzero, cxr_foundation, chexagent2_classify).
+- EXCLUDE if 2+ classifiers say no, even if a report mentions it.
 
 ## Phase 4: Ground Confirmed Findings (1-3 calls)
 For each confirmed abnormal finding:
-7. `chexagent2_grounding` with `task="phrase_grounding"`, `phrase="<finding>"` — bounding box for focal findings (cardiomegaly, nodule, device).
-8. `biomedparse_segment` with `prompts=["<finding>"]` — segmentation for diffuse findings (effusion, opacity, consolidation, atelectasis). Use coverage_pct to validate extent.
+8. `chexagent2_grounding` with `task="phrase_grounding"`, `phrase="<finding>"` — bounding box for focal findings (cardiomegaly, nodule, device).
+9. `biomedparse_segment` with `prompts=["<finding>"]` — segmentation for diffuse findings (effusion, opacity, consolidation, atelectasis). Use coverage_pct to validate extent.
 
 ## Phase 5: Verify (1 call — MANDATORY)
-9. `factchexcker_verify` with your draft report text. If it flags errors, fix them.
+10. `factchexcker_verify` with your draft report text. If it flags errors, fix them.
 
 ## Phase 6: Write Final Report
 

@@ -27,6 +27,7 @@ cache/
 *.log
 
 # Model weights and large files
+models/
 *.pt
 *.pth
 *.bin
@@ -34,6 +35,9 @@ cache/
 *.ckpt
 *.h5
 *.hdf5
+
+# Experiment outputs
+results.tsv
 
 # Reference code (not part of the agent)
 tmp/

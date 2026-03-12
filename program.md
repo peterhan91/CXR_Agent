@@ -16,7 +16,7 @@ Autonomous experimentation for CXR report generation. The agent reads this file,
 
 Per study, output: report text (FINDINGS + IMPRESSION), grounded findings (JSON with bboxes), two figures (`{id}_bbox.png`, `{id}_mask.png`).
 
-## Tools (9 active)
+## Tools (10 active)
 
 All validated 2026-03-11. Use as many as possible per study (target 8-12 calls).
 
@@ -28,7 +28,8 @@ All validated 2026-03-11. Use as many as possible per study (target 8-12 calls).
 | `chexagent2_classify` | :8001 | Binary disease classification (`task=binary_disease`, `disease_name="..."`) |
 | `chexagent2_vqa` | :8001 | Follow-up questions |
 | `chexone_report` | :8002 | Second-opinion report (Qwen2.5-VL) |
-| `chexzero_classify` | :8008 | Zero-shot 14-label screening (P>0.5 = positive; best for cardiomegaly/edema) |
+| `chexzero_classify` | :8009 | CheXzero zero-shot 14-label screening (CLIP ViT-B/32 + logit_scale) |
+| `cxr_foundation_classify` | :8008 | Google CXR Foundation zero-shot 14-label screening (ELIXR v2, CPU) |
 | `biomedparse_segment` | :8005 | Text-prompted segmentation (`prompts=["left lung"]`; good for anatomy, not pathology) |
 | `factchexcker_verify` | :8007 | Report hallucination checker |
 
@@ -49,28 +50,44 @@ Plus **CLEAR concept prior** — DINOv2+CLIP cosine similarity to MIMIC-CXR conc
 - `tools/*.py` and `servers/*.py` — tool and server implementations.
 - `clear/` — CLEAR concept scorer.
 
+## Data splits
+
+**Validation set** (`results/eval_val/test_set.json`): 25 unique patients from MIMIC-CXR `validate` split. Use this for ALL iterative optimization. Reports are in `reports/files/` subdirectory.
+
+**Test set** (`results/eval/test_set.json`): 5 unique patients from MIMIC-CXR `test` split. Use ONLY for final evaluation after finding best config on validation set. Never peek at test metrics during iteration.
+
+**Important**: Always sample one study per patient (`drop_duplicates('subject_id')`) to avoid data leakage. Reports live in `$MIMIC/reports/files/`, so pass `--reports_dir $MIMIC/reports` to prepare.
+
 ## Running experiments
 
 ```bash
 MIMIC=/home/than/physionet.org/files/mimic-cxr-jpg/2.0.0
 CFG=configs/config_grounded.yaml
 
-# Prepare test set (run once)
-python scripts/eval_mimic.py --mode prepare --mimic_dir $MIMIC --output results/eval/ --max_samples 5
+# Prepare validation set (25 unique patients, validate split) — already done
+# results/eval_val/test_set.json
 
-# Baselines (run once)
-python scripts/eval_mimic.py --mode sonnet --output results/eval/ --config $CFG
-python scripts/eval_mimic.py --mode chexone --output results/eval/ --config $CFG
+# Prepare test set (5 unique patients, test split) — already done
+# results/eval/test_set.json
 
-# Agent run
-python scripts/eval_mimic.py --mode agent --output results/eval_iter_N/ --config $CFG
+# Baselines on validation set (run once)
+python scripts/eval_mimic.py --mode sonnet --output results/eval_val/ --config $CFG
+python scripts/eval_mimic.py --mode chexone --output results/eval_val/ --config $CFG
 
-# Score and compare
-python scripts/eval_mimic.py --mode score --output results/eval_iter_N/
-python scripts/eval_mimic.py --mode compare --output results/eval_iter_N/
+# Agent run on VALIDATION set (iterate here)
+python scripts/eval_mimic.py --mode agent --output results/eval_val_iter_N/ --config $CFG
+
+# Score and compare on validation set
+python scripts/eval_mimic.py --mode score --output results/eval_val_iter_N/
+python scripts/eval_mimic.py --mode compare --output results/eval_val_iter_N/
+
+# FINAL TEST (only after best config found on validation)
+python scripts/eval_mimic.py --mode agent --output results/eval_test_final/ --config $CFG
+python scripts/eval_mimic.py --mode score --output results/eval_test_final/
+python scripts/eval_mimic.py --mode compare --output results/eval_test_final/
 ```
 
-Extract key metrics: `cat results/eval_iter_N/comparison.txt`
+Extract key metrics: `cat results/eval_val_iter_N/comparison.txt`
 
 ## Logging results
 
@@ -95,9 +112,9 @@ LOOP FOREVER:
    - "Agent not using enough tools → add explicit instructions to call all 9"
 3. Implement: edit `agent/prompts.py`, `skills/*.md`, `configs/config_grounded.yaml`, or `agent/react_agent.py`.
 4. git commit.
-5. Run: `python scripts/eval_mimic.py --mode agent --output results/eval_iter_N/ --config configs/config_grounded.yaml`
-6. Score: `python scripts/eval_mimic.py --mode score --output results/eval_iter_N/`
-7. Read results: `cat results/eval_iter_N/comparison.txt`
+5. Run on VALIDATION: `python scripts/eval_mimic.py --mode agent --output results/eval_val_iter_N/ --config configs/config_grounded.yaml`
+6. Score: `python scripts/eval_mimic.py --mode score --output results/eval_val_iter_N/`
+7. Read results: `cat results/eval_val_iter_N/comparison.txt`
 8. Record in `results.tsv`.
 9. If metrics improved → **keep** the commit, advance.
 10. If metrics regressed → **discard**, `git reset --hard HEAD~1`.
@@ -107,7 +124,7 @@ LOOP FOREVER:
 
 **Crashes**: If a run crashes, check the error. If it's a typo or easy fix, fix and re-run. If the idea is fundamentally broken, log `crash` in results.tsv, revert, and move on.
 
-**Timeout**: Each agent run on 5 CXRs should take ~5-15 minutes. If it exceeds 30 minutes, kill and discard.
+**Timeout**: Each agent run on 25 validation CXRs should take ~25-75 minutes. If it exceeds 120 minutes, kill and discard.
 
 **NEVER STOP**: Once the loop begins, do NOT pause to ask the human anything. Do NOT ask "should I continue?" or "is this good enough?". The human may be asleep. Continue indefinitely until manually interrupted or all 5 metrics beat all baselines. If you run out of ideas, think harder — re-read tool outputs, try combining approaches, try radical prompt changes, try different skill strategies. The loop runs until the human stops you.
 
@@ -116,6 +133,6 @@ LOOP FOREVER:
 - **MIMIC-CXR-JPG**: `/home/than/physionet.org/files/mimic-cxr-jpg/2.0.0/`
 - **Config**: `configs/config_grounded.yaml`
 - **Skill file**: `skills/grounded_report.md`
-- **GPU 0**: CheXagent-2 (18.6GB) | **GPU 1**: CheXOne + CheXzero + BiomedParse | **GPU 2**: FactCheXcker + eval
+- **GPU 0**: CheXagent-2 (18.6GB) | **GPU 1**: CheXOne + CheXzero(:8009) + BiomedParse | **GPU 2**: FactCheXcker + eval | **CPU**: CXR Foundation(:8008)
 - **Conda envs**: `cxr_agent` (main), `cxr_chexagent2`, `radgraph` (eval step 1), `green_score` (eval steps 2-3)
 - **Server safety**: shared GPU server. Never delete outside `CXR_Agent/`, never touch other envs, never kill others' processes.

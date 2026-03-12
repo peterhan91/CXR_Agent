@@ -10,6 +10,7 @@ from tools.chexagent2 import (
 )
 from tools.chexone import CheXOneReportTool
 from tools.chexzero import CheXzeroClassifyTool
+from tools.cxr_foundation import CXRFoundationClassifyTool
 from tools.medversa import (
     MedVersaReportTool,
     MedVersaClassifyTool,
@@ -32,8 +33,9 @@ __all__ = [
     "CheXagent2VQATool",
     # CheXOne
     "CheXOneReportTool",
-    # CheXzero (zero-shot classification)
+    # Zero-shot classification
     "CheXzeroClassifyTool",
+    "CXRFoundationClassifyTool",
     # MedVersa (multi-task) — broken, kept for reference
     "MedVersaReportTool",
     "MedVersaClassifyTool",
