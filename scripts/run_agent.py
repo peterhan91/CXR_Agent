@@ -109,6 +109,9 @@ def run_single_image(
     config: dict,
     scorer: CLEARConceptScorer = None,
     agent: CXRReActAgent = None,
+    prior_report: str = "",
+    prior_image_path: str = "",
+    clinical_context: str = "",
 ) -> dict:
     """Run the agent on a single CXR image.
 
@@ -132,6 +135,9 @@ def run_single_image(
         image_path=image_path,
         concept_prior_text=concept_prior_text,
         image_id=image_id,
+        prior_report=prior_report,
+        prior_image_path=prior_image_path,
+        clinical_context=clinical_context,
     )
 
     logger.info(
@@ -167,6 +173,9 @@ def main():
     parser.add_argument("--no_clear", action="store_true", help="Skip CLEAR concept scoring")
     parser.add_argument("--no_skills", action="store_true", help="Run without skill files")
     parser.add_argument("--skill_path", type=str, help="Path to evolved skill file")
+    parser.add_argument("--prior_report", type=str, help="Path to prior CXR report text file")
+    parser.add_argument("--prior_image", type=str, help="Path to prior CXR image (for tool calls)")
+    parser.add_argument("--clinical_context", type=str, help="Path to clinical context text file (HPI + chief complaint)")
     args = parser.parse_args()
 
     # Load config
@@ -223,9 +232,28 @@ def main():
     # Create output directory
     os.makedirs(args.output, exist_ok=True)
 
+    # Load optional prior report and clinical context from files
+    prior_report = ""
+    if args.prior_report and os.path.exists(args.prior_report):
+        with open(args.prior_report) as f:
+            prior_report = f.read().strip()
+        logger.info(f"Loaded prior report from {args.prior_report}")
+    prior_image_path = args.prior_image or ""
+
+    clinical_context = ""
+    if args.clinical_context and os.path.exists(args.clinical_context):
+        with open(args.clinical_context) as f:
+            clinical_context = f.read().strip()
+        logger.info(f"Loaded clinical context from {args.clinical_context}")
+
     # Run on single image or directory
     if args.image:
-        result = run_single_image(args.image, config, scorer, agent)
+        result = run_single_image(
+            args.image, config, scorer, agent,
+            prior_report=prior_report,
+            prior_image_path=prior_image_path,
+            clinical_context=clinical_context,
+        )
 
         # Print report
         print("\n" + "=" * 80)
@@ -252,7 +280,12 @@ def main():
 
         results = []
         for img_path in image_files:
-            result = run_single_image(str(img_path), config, scorer, agent)
+            result = run_single_image(
+                str(img_path), config, scorer, agent,
+                prior_report=prior_report,
+                prior_image_path=prior_image_path,
+                clinical_context=clinical_context,
+            )
             results.append(result)
 
         # Save all results

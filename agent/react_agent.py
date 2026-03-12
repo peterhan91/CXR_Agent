@@ -184,6 +184,9 @@ class CXRReActAgent:
         image_path: str,
         concept_prior_text: str = "",
         image_id: str = "",
+        prior_report: str = "",
+        prior_image_path: str = "",
+        clinical_context: str = "",
     ) -> AgentTrajectory:
         """
         Run the ReAct agent to generate a CXR report.
@@ -201,6 +204,9 @@ class CXRReActAgent:
             image_path: Path to the CXR image file
             concept_prior_text: Formatted CLEAR concept scores for this image
             image_id: Identifier for logging/trajectory tracking
+            prior_report: Text of the most recent prior CXR report (if available)
+            prior_image_path: Path to the prior CXR image (agent can pass to tools)
+            clinical_context: Formatted clinical context (HPI + chief complaint)
 
         Returns:
             AgentTrajectory with full reasoning trace and final report
@@ -216,7 +222,12 @@ class CXRReActAgent:
         messages = [
             {
                 "role": "user",
-                "content": self._build_initial_message(image_path),
+                "content": self._build_initial_message(
+                    image_path,
+                    prior_report=prior_report,
+                    prior_image_path=prior_image_path,
+                    clinical_context=clinical_context,
+                ),
             }
         ]
 
@@ -351,7 +362,38 @@ class CXRReActAgent:
         trajectory.total_duration_ms = (time.time() - start_time) * 1000
         return trajectory
 
-    def _build_initial_message(self, image_path: str) -> list:
+    def _encode_image(self, image_path: str) -> dict | None:
+        """Encode an image file as a base64 Anthropic image content block."""
+        _SUPPORTED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+        mime_type = mimetypes.guess_type(image_path)[0]
+        if mime_type not in _SUPPORTED_MIME_TYPES:
+            logger.warning(
+                f"MIME type '{mime_type}' for {image_path} not supported by Anthropic API, "
+                f"defaulting to image/png. Supported: {_SUPPORTED_MIME_TYPES}"
+            )
+            mime_type = "image/png"
+        try:
+            with open(image_path, "rb") as f:
+                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+        except FileNotFoundError:
+            logger.warning(f"Image file not found: {image_path}")
+            return None
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": mime_type,
+                "data": image_data,
+            },
+        }
+
+    def _build_initial_message(
+        self,
+        image_path: str,
+        prior_report: str = "",
+        prior_image_path: str = "",
+        clinical_context: str = "",
+    ) -> list:
         """Build the initial user message with CXR image and instructions.
 
         Analogous to mimic_skills' "Patient History: {input}" in the prompt,
@@ -361,41 +403,41 @@ class CXRReActAgent:
 
         # Add the CXR image if path provided
         if image_path:
-            _SUPPORTED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
-            mime_type = mimetypes.guess_type(image_path)[0]
-            if mime_type not in _SUPPORTED_MIME_TYPES:
-                # DICOM (.dcm) returns 'application/dicom', unknown extensions return None
-                # Default to PNG which is the most common CXR format
-                logger.warning(
-                    f"MIME type '{mime_type}' for {image_path} not supported by Anthropic API, "
-                    f"defaulting to image/png. Supported: {_SUPPORTED_MIME_TYPES}"
+            img_block = self._encode_image(image_path)
+            if img_block:
+                content.append(img_block)
+
+        # Build the task instruction text
+        text_parts = [
+            f"Please analyze this chest X-ray and generate a comprehensive radiology report. "
+            f"The image file path is: {image_path}",
+        ]
+
+        # Clinical context (HPI + chief complaint)
+        if clinical_context:
+            text_parts.append(f"\nCLINICAL CONTEXT:\n{clinical_context}")
+
+        # Prior study (report text + image path for tool calls)
+        if prior_report:
+            prior_section = f"\nPRIOR STUDY REPORT:\n{prior_report}"
+            if prior_image_path:
+                prior_section += (
+                    f"\n\nThe prior study image is available at: {prior_image_path}\n"
+                    f"You may call tools with this path to compare findings."
                 )
-                mime_type = "image/png"
-            with open(image_path, "rb") as f:
-                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+            text_parts.append(prior_section)
 
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": mime_type,
-                    "data": image_data,
-                },
-            })
+        text_parts.append(
+            f"\nUse the available tools to gather information from specialized CXR models. "
+            f"When calling tools, pass image_path=\"{image_path}\" exactly as shown.\n\n"
+            f"Synthesize your findings into a final report with FINDINGS and IMPRESSION sections. "
+            f"When you have gathered sufficient information from the tools, stop calling tools "
+            f"and provide your final synthesized report directly."
+        )
 
-        # Add the task instruction — include the filesystem path so the agent
-        # can pass it to tools (tools need the path, not the base64 image)
         content.append({
             "type": "text",
-            "text": (
-                f"Please analyze this chest X-ray and generate a comprehensive radiology report. "
-                f"The image file path is: {image_path}\n\n"
-                f"Use the available tools to gather information from specialized CXR models. "
-                f"When calling tools, pass image_path=\"{image_path}\" exactly as shown.\n\n"
-                f"Synthesize your findings into a final report with FINDINGS and IMPRESSION sections. "
-                f"When you have gathered sufficient information from the tools, stop calling tools "
-                f"and provide your final synthesized report directly."
-            ),
+            "text": "\n".join(text_parts),
         })
 
         return content

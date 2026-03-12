@@ -54,7 +54,7 @@ GROUNDINGS:
 Do NOT output ANY text before "FINDINGS:" — no preamble, no reasoning, no summary.
 Do NOT use markdown (no ##, **, --, bullets). Plain text only.
 Do NOT mention tools, models, concept priors, or your reasoning in the report.
-Do NOT reference prior studies or interval change.
+If a PRIOR STUDY REPORT is provided, describe interval changes compared to the prior. Otherwise, do NOT reference prior studies or interval change.
 """
 
 

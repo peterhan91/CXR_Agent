@@ -355,6 +355,32 @@ def run_chexone(args):
 # ─── CXR Agent ───────────────────────────────────────────────────────────────
 
 
+def _build_clinical_context(admission_info: dict) -> str:
+    """Build clinical context string from admission info (HPI + chief complaint)."""
+    parts = []
+    cc = admission_info.get("chief_complaint", "")
+    if cc:
+        parts.append(f"Chief Complaint: {cc}")
+    hpi = admission_info.get("patient_history", "")
+    if hpi:
+        parts.append(f"History of Present Illness: {hpi}")
+    return "\n\n".join(parts)
+
+
+def _get_most_recent_prior(entry: dict) -> tuple:
+    """Get the most recent prior study report and image path.
+
+    Returns:
+        (prior_report, prior_image_path) — both empty string if no priors
+    """
+    priors = entry.get("prior_studies", [])
+    if not priors:
+        return "", ""
+    # priors are sorted by date descending, so first is most recent
+    most_recent = priors[0]
+    return most_recent.get("report", ""), most_recent.get("image_path", "")
+
+
 def run_agent_eval(args):
     """Generate reports using the full CXR Agent pipeline.
 
@@ -366,6 +392,21 @@ def run_agent_eval(args):
 
     output_dir = Path(args.output)
     test_set = _load_test_set(output_dir)
+
+    # Load enriched data if using prior/clinical context
+    enriched_lookup = {}
+    if args.use_prior or args.use_clinical_context:
+        enriched_path = args.enriched_json
+        if enriched_path and os.path.exists(enriched_path):
+            with open(enriched_path) as f:
+                enriched_data = json.load(f)
+            enriched_lookup = {e["study_id"]: e for e in enriched_data}
+            logger.info(f"Loaded {len(enriched_lookup)} enriched entries from {enriched_path}")
+        else:
+            logger.warning(
+                f"--use_prior or --use_clinical_context set but enriched JSON not found: {enriched_path}. "
+                "Run scripts/prepare_mimic_studies.py first."
+            )
 
     # Load config
     with open(args.config) as f:
@@ -428,11 +469,25 @@ def run_agent_eval(args):
             top_k = config.get("clear", {}).get("top_k", 20)
             concept_prior = scorer.score_image(entry["image_path"], top_k=top_k)
 
+        # Build optional context from enriched data
+        prior_report = ""
+        prior_image_path = ""
+        clinical_context = ""
+        enriched = enriched_lookup.get(study_id)
+        if enriched:
+            if args.use_prior:
+                prior_report, prior_image_path = _get_most_recent_prior(enriched)
+            if args.use_clinical_context and enriched.get("admission_info"):
+                clinical_context = _build_clinical_context(enriched["admission_info"])
+
         try:
             trajectory = agent.run(
                 image_path=entry["image_path"],
                 concept_prior_text=concept_prior,
                 image_id=study_id,
+                prior_report=prior_report,
+                prior_image_path=prior_image_path,
+                clinical_context=clinical_context,
             )
             report = trajectory.final_report
             in_tok = trajectory.total_input_tokens
@@ -1113,6 +1168,13 @@ Examples:
 
     # Agent mode
     parser.add_argument("--no_clear", action="store_true", help="Skip CLEAR concept scoring")
+    parser.add_argument("--use_prior", action="store_true", help="Feed most recent prior CXR report to agent")
+    parser.add_argument("--use_clinical_context", action="store_true", help="Feed HPI + chief complaint to agent")
+    parser.add_argument(
+        "--enriched_json",
+        help="Path to enriched studies JSON (from prepare_mimic_studies.py). "
+        "Required when --use_prior or --use_clinical_context is set.",
+    )
 
     args = parser.parse_args()
 
