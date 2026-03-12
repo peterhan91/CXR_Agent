@@ -79,7 +79,7 @@ FINDINGS section:
 IMPRESSION section:
 - 1 sentence. If normal: "No acute cardiopulmonary process." If abnormal: state key finding(s).
 
-**LENGTH: Match the natural length of a real MIMIC-CXR report. Normal studies are short (~20-30 words). Complex cases with multiple findings or devices may be longer (~40-70 words). Do NOT pad short reports or truncate complex ones. IMPRESSION is always 1 sentence.**
+**LENGTH: Be concise. Real MIMIC-CXR reports average ~45 words total. Normal studies: ~20-30 words. Abnormal with multiple findings: ~40-70 words. Avoid verbose descriptions — state findings directly without elaboration. IMPRESSION is always 1 sentence.**
 
 ### Output Format
 ```
