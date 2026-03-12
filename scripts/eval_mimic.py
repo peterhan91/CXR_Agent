@@ -196,8 +196,9 @@ def prepare_test_set(args):
 
     logger.info(f"Loading split from {split_path}")
     split_df = pd.read_csv(split_path)
-    test_df = split_df[split_df["split"] == "test"].copy()
-    logger.info(f"Test split: {len(test_df)} images")
+    target_split = args.split
+    test_df = split_df[split_df["split"] == target_split].copy()
+    logger.info(f"{target_split} split: {len(test_df)} images")
 
     # Load metadata CSV
     meta_path = _find_csv(mimic_dir, "mimic-cxr-2.0.0-metadata")
@@ -223,6 +224,12 @@ def prepare_test_set(args):
     frontal["_priority"] = frontal["ViewPosition"].map({"PA": 0, "AP": 1})
     frontal = frontal.sort_values("_priority").drop_duplicates("study_id", keep="first")
     logger.info(f"Unique test studies with frontal view: {len(frontal)}")
+
+    if args.unique_patients:
+        # Sort by study_id descending so we keep the latest study per patient
+        frontal = frontal.sort_values("study_id", ascending=False)
+        frontal = frontal.drop_duplicates("subject_id", keep="first")
+        logger.info(f"Unique patients (one study per subject): {len(frontal)}")
 
     if args.max_samples:
         frontal = frontal.head(args.max_samples)
@@ -1158,6 +1165,17 @@ Examples:
         help="Directory with report .txt files (default: same as mimic_dir)",
     )
     parser.add_argument("--max_samples", type=int, help="Limit test set size (for debugging)")
+    parser.add_argument(
+        "--split",
+        default="test",
+        choices=["test", "validate"],
+        help="MIMIC-CXR split to sample from (default: test)",
+    )
+    parser.add_argument(
+        "--unique_patients",
+        action="store_true",
+        help="Deduplicate by subject_id (one study per patient)",
+    )
 
     # CheXOne mode
     parser.add_argument(
