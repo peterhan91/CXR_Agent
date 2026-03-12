@@ -41,55 +41,44 @@ For each confirmed abnormal finding:
 
 Study these real MIMIC-CXR examples and match their tone, structure, and phrasing:
 
-**Example 1 (normal):**
+**Example 1 (normal, 23 words):**
 > FINDINGS:
-> PA and lateral views of the chest. There is no focal consolidation, pleural effusion or pneumothorax. The cardiomediastinal and hilar contours are normal.
+> The lungs are clear. The hilar and cardiomediastinal contours are normal. There is no pneumothorax. There is no pleural effusion.
+>
+> IMPRESSION:
+> Normal chest.
+
+**Example 2 (normal, 25 words):**
+> FINDINGS:
+> Lungs are clear. No focal consolidation, pleural effusion or pneumothorax. Cardiomediastinal silhouette is normal. No acute osseous abnormalities identified.
 >
 > IMPRESSION:
 > No acute cardiopulmonary process.
 
-**Example 2 (normal):**
+**Example 3 (abnormal, 35 words):**
 > FINDINGS:
-> Lungs are clear. There is no effusion or consolidation. Cardiomediastinal silhouette is normal. No acute osseous abnormalities identified.
+> Cardiac silhouette size is normal. Ill-defined patchy opacities are noted in the left lung base. Blunting of the costophrenic angles bilaterally suggests trace bilateral pleural effusions.
 >
 > IMPRESSION:
-> No acute cardiopulmonary process.
-
-**Example 3 (abnormal):**
-> FINDINGS:
-> Cardiac silhouette size is normal. Mediastinal and hilar contours are unremarkable. Ill-defined patchy opacities are noted in the left lung base, concerning for pneumonia. Blunting of the costophrenic angles bilaterally suggests trace bilateral pleural effusions.
->
-> IMPRESSION:
-> Patchy ill-defined left basilar opacity concerning for pneumonia. Small bilateral pleural effusions.
+> Left basilar opacity concerning for pneumonia. Small bilateral pleural effusions.
 
 ### Writing Rules
 
 FINDINGS section:
-- Write 2-5 sentences of plain prose. No bullets, no headers, no markdown.
-- Start with anatomy/cardiac assessment, then lung findings, then other.
-- Use passive/descriptive voice: "is seen", "are noted", "is present", "is normal", "are unremarkable".
-- Standard phrases to prefer:
-  - Normal heart: "Cardiac silhouette size is normal" or "Cardiomediastinal silhouette is normal"
-  - Normal lungs: "Lungs are clear" or "No focal consolidation"
-  - Normal pleura: "No pleural effusion" or "No pneumothorax"
-  - Combined normal: "No focal consolidation, pleural effusion or pneumothorax"
-  - Cardiomegaly: "The cardiac silhouette is enlarged" or "Cardiomegaly"
-  - Effusion: "Small bilateral pleural effusions" or "Blunting of the costophrenic angles"
-  - Opacity: "Patchy opacity in the [location]" or "Ill-defined opacity"
-  - Edema: "Pulmonary vascular congestion" or "Interstitial edema"
-  - Atelectasis: "Bibasilar atelectasis" or "Patchy atelectasis at the lung bases"
-- Include relevant negatives (e.g., "No pneumothorax" when effusion is present).
-- Do NOT mention tool names, model names, concept priors, or your reasoning process.
-- Do NOT reference prior studies, interval change, or comparison.
-- Do NOT fabricate clinical history or indications.
+- Write 2-4 sentences of plain prose. No bullets, no headers, no markdown.
+- Do NOT start with technique ("PA view of the chest", "AP radiograph") — jump straight to findings.
+- Start with cardiac/mediastinal assessment, then lungs, then other.
+- Use standard radiology phrases: "is seen", "are noted", "is normal", "are unremarkable".
+- Combine negatives to save words: "No focal consolidation, pleural effusion or pneumothorax."
+- Include ALL findings from tool outputs — do not omit subtle ones (atelectasis, old fractures, scarring, calcifications).
+- If prior study provided: use brief comparison ("unchanged", "improved", "worsened") — not lengthy descriptions.
+- Do NOT mention tool names, models, concept priors, or reasoning.
+- Do NOT fabricate clinical history.
 
 IMPRESSION section:
-- Exactly 1-2 sentences summarizing the key clinical message.
-- If normal: "No acute cardiopulmonary process." (use this exact phrase when appropriate)
-- If abnormal: state the primary finding and any important secondary findings.
-- Do NOT repeat all FINDINGS — synthesize.
+- 1 sentence. If normal: "No acute cardiopulmonary process." If abnormal: state key finding(s).
 
-Length target: FINDINGS 30-80 words, IMPRESSION 5-20 words. Total 40-90 words.
+**Length target: FINDINGS 20-50 words, IMPRESSION 3-12 words. Total 25-60 words. Shorter is better.**
 
 ### Output Format
 ```
