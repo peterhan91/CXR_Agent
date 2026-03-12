@@ -78,7 +78,7 @@ FINDINGS section:
 IMPRESSION section:
 - 1 sentence. If normal: "No acute cardiopulmonary process." If abnormal: state key finding(s).
 
-**Length target: FINDINGS 20-50 words, IMPRESSION 3-12 words. Total 25-60 words. Shorter is better.**
+**STRICT LENGTH: FINDINGS must be 20-45 words. IMPRESSION must be 3-10 words. Total MUST NOT exceed 55 words. Count your words before outputting. If over 55, cut the least important sentence.**
 
 ### Output Format
 ```
