@@ -37,61 +37,28 @@ For each confirmed abnormal finding:
 
 ## Phase 6: Write Final Report
 
-### CRITICAL — Match MIMIC-CXR Report Style Exactly
+### CRITICAL — Match MIMIC-CXR Report Style
 
-Study these real MIMIC-CXR examples and match their tone, structure, and phrasing:
-
-**Example 1 (normal, 23 words):**
-> FINDINGS:
-> The lungs are clear. The hilar and cardiomediastinal contours are normal. There is no pneumothorax. There is no pleural effusion.
->
-> IMPRESSION:
-> Normal chest.
-
-**Example 2 (normal, 27 words):**
-> FINDINGS:
-> The lungs are clear. There is no focal consolidation, pleural effusion or pneumothorax. The cardiomediastinal silhouette is normal. Pulmonary vascularity is normal.
->
-> IMPRESSION:
-> No acute cardiopulmonary process.
-
-**Example 3 (comparison, stable, 15 words):**
-> FINDINGS:
-> Compared to the prior study there is no significant interval change.
->
-> IMPRESSION:
-> No change.
-
-**Example 4 (abnormal, 35 words):**
-> FINDINGS:
-> Cardiac silhouette size is normal. Ill-defined patchy opacities are noted in the left lung base. Blunting of the costophrenic angles bilaterally suggests trace bilateral pleural effusions.
->
-> IMPRESSION:
-> Left basilar opacity concerning for pneumonia. Small bilateral pleural effusions.
+Write reports that match standard MIMIC-CXR dictation style. The Phase 1 reports provide style reference for each specific study — use them as a guide for tone and phrasing.
 
 ### Writing Rules
 
 FINDINGS section:
-- Write 2-4 sentences of plain prose. No bullets, no headers, no markdown.
+- Write plain prose. No bullets, no headers, no markdown.
 - Do NOT start with technique ("PA view of the chest", "AP radiograph") — jump straight to findings.
-- Start with cardiac/mediastinal assessment, then lungs, then other.
 - Prefer "There is..." / "There is no..." phrasing for stating/negating findings (e.g., "There is no pleural effusion.", "There is no pneumothorax."). This matches standard MIMIC-CXR dictation style.
 - Use standard radiology phrases: "is seen", "are noted", "is normal", "are unremarkable".
-- Use standard radiology abbreviations: "ET tube" (not "endotracheal tube"), "NG tube" (not "nasogastric tube"), "SVC" (not "superior vena cava"), "IJ" (not "internal jugular"). Use "Heart size" or "Cardiac silhouette size" to describe cardiac size.
 - Combine negatives: "There is no focal consolidation, pleural effusion or pneumothorax."
 - Include ALL findings from tool outputs — do not omit subtle ones (atelectasis, old fractures, scarring, calcifications).
-- If prior study provided: focus on what CHANGED. Use "unchanged", "improved", "worsened". Do NOT re-describe unchanged devices or findings — a single sentence like "Support devices are unchanged in position." suffices. If nothing changed, the entire report can be as brief as "No significant interval change."
+- If prior study provided: focus on what CHANGED. Use "unchanged", "improved", "worsened".
 - Do NOT mention tool names, models, concept priors, or reasoning.
 - Do NOT fabricate clinical history or specific measurements (e.g., distances in cm) unless a tool explicitly reported them.
 
 IMPRESSION section:
-- Exactly 1 sentence, ≤10 words. If normal: "No acute cardiopulmonary process." If abnormal: state only the single most important finding. Never list multiple findings in IMPRESSION — that belongs in FINDINGS.
+- 1-2 sentences summarizing the key findings. If normal: "No acute cardiopulmonary process."
 
 Comparison studies:
-- If tools and reports indicate no significant change since prior: write ONLY "Compared to the prior study there is no significant interval change." for FINDINGS and "No change." for IMPRESSION. Do NOT enumerate stable findings individually.
 - When describing interval changes, use "unchanged", "stable", or "persistent" unless tool outputs explicitly describe a direction of change. Do NOT guess at "worsened" or "improved" — incorrect change direction is worse than neutral phrasing.
-
-**LENGTH: Be concise. Real MIMIC-CXR reports average ~45 words total. Normal studies: ~20-30 words. Abnormal with multiple findings: ~40-70 words. Comparison studies with no change: ~15 words. State findings directly without elaboration.**
 
 ### Output Format
 ```
