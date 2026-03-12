@@ -18,10 +18,11 @@ Call all three report generators. Each provides a different clinical perspective
 4. `chexzero_classify` — CheXzero zero-shot 14-label screening. Record all labels marked PRESENT.
 5. `cxr_foundation_classify` — CXR Foundation zero-shot 14-label screening. Record all labels marked PRESENT.
 
-## Phase 3: Confirm Suspected Findings (1-3 calls)
+## Phase 3: Confirm Suspected Findings (1-4 calls)
 For each finding flagged positive by Phase 1 reports OR Phase 2 screening:
 6. `chexagent2_classify` with `task="binary_disease"`, `disease_name="<finding>"` — binary confirmation.
 7. If Phase 1 reports disagree on a finding, call `chexagent2_vqa` with a direct yes/no question (e.g., "Is there a pleural effusion?").
+8. Use `medgemma_vqa` for a second-opinion VQA when classifiers are split (e.g., "Does this chest X-ray show cardiomegaly?").
 
 Decision rule:
 - INCLUDE a finding if at least 2 of 3 classifiers agree (chexzero, cxr_foundation, chexagent2_classify).

@@ -1011,11 +1011,22 @@ def _save_grounded_images(predictions: list, test_set: list, output_dir: Path):
 
             color = colors[idx % len(colors)]
             # Normalize bbox to pixel coordinates
-            x_min, y_min, x_max, y_max = bbox
-            # Handle both [0,1] normalized and already-pixel coords
-            if all(0 <= v <= 1.0 for v in bbox):
+            x_min, y_min, x_max, y_max = [float(v) for v in bbox]
+
+            # Detect coordinate scale and convert to pixel coords:
+            # [0,1]     → normalized (from server) — multiply by image dims
+            # (1,1000]  → CheXagent-2 0-100 scale misread as 0-1000 by agent — divide by 1000 then scale
+            # >1000     → already pixel coordinates — use directly
+            max_coord = max(abs(x_min), abs(y_min), abs(x_max), abs(y_max))
+            if max_coord <= 1.0:
+                # Normalized [0,1] — scale to pixels
                 x_min, x_max = x_min * w, x_max * w
                 y_min, y_max = y_min * h, y_max * h
+            elif max_coord <= 1000:
+                # 0-1000 scale (agent parsed "0.140" as 140) — normalize first
+                x_min, x_max = (x_min / 1000) * w, (x_max / 1000) * w
+                y_min, y_max = (y_min / 1000) * h, (y_max / 1000) * h
+            # else: already pixel coordinates, use as-is
 
             # Draw bbox (3px thick)
             for offset in range(3):
