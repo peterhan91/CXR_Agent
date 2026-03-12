@@ -359,6 +359,156 @@ def run_chexone(args):
     _print_summary("CheXOne", predictions, errors, predictions_path)
 
 
+def run_chexagent2(args):
+    """Generate reports using CheXagent-2 server (baseline, no agent)."""
+    import requests as req_lib
+
+    output_dir = Path(args.output)
+    test_set = _load_test_set(output_dir)
+
+    endpoint = "http://localhost:8001"
+    predictions_path = output_dir / "predictions_chexagent2.json"
+
+    existing = _load_existing_predictions(predictions_path)
+    predictions = list(existing.values())
+    total = len(test_set)
+    errors = 0
+
+    for i, entry in enumerate(test_set):
+        study_id = entry["study_id"]
+        if study_id in existing:
+            continue
+
+        t0 = time.time()
+        try:
+            resp = req_lib.post(
+                f"{endpoint}/generate_report",
+                json={"image_path": entry["image_path"], "task": "report"},
+                timeout=120,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            report = data.get("report", data.get("text", ""))
+            gen_time = data.get("generation_time_ms", 0)
+        except Exception as e:
+            logger.error(f"[{i+1}/{total}] Failed study {study_id}: {e}")
+            report = ""
+            gen_time = 0
+            errors += 1
+
+        pred = {
+            "study_id": study_id,
+            "report_pred": report,
+            "generation_time_ms": gen_time,
+            "wall_time_ms": (time.time() - t0) * 1000,
+        }
+        predictions.append(pred)
+        existing[study_id] = pred
+
+    _save_predictions(predictions_path, predictions)
+    _print_summary("CheXagent-2", predictions, errors, predictions_path)
+
+
+def run_medgemma(args):
+    """Generate reports using MedGemma server (baseline, no agent)."""
+    import requests as req_lib
+
+    output_dir = Path(args.output)
+    test_set = _load_test_set(output_dir)
+
+    endpoint = "http://localhost:8010"
+    predictions_path = output_dir / "predictions_medgemma.json"
+
+    existing = _load_existing_predictions(predictions_path)
+    predictions = list(existing.values())
+    total = len(test_set)
+    errors = 0
+
+    for i, entry in enumerate(test_set):
+        study_id = entry["study_id"]
+        if study_id in existing:
+            continue
+
+        t0 = time.time()
+        try:
+            resp = req_lib.post(
+                f"{endpoint}/generate_report",
+                json={"image_path": entry["image_path"]},
+                timeout=120,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            report = data.get("report", "")
+            gen_time = data.get("generation_time_ms", 0)
+        except Exception as e:
+            logger.error(f"[{i+1}/{total}] Failed study {study_id}: {e}")
+            report = ""
+            gen_time = 0
+            errors += 1
+
+        pred = {
+            "study_id": study_id,
+            "report_pred": report,
+            "generation_time_ms": gen_time,
+            "wall_time_ms": (time.time() - t0) * 1000,
+        }
+        predictions.append(pred)
+        existing[study_id] = pred
+
+    _save_predictions(predictions_path, predictions)
+    _print_summary("MedGemma", predictions, errors, predictions_path)
+
+
+def run_medversa(args):
+    """Generate reports using MedVersa server (baseline, no agent)."""
+    import requests as req_lib
+
+    output_dir = Path(args.output)
+    test_set = _load_test_set(output_dir)
+
+    endpoint = "http://localhost:8003"
+    predictions_path = output_dir / "predictions_medversa.json"
+
+    existing = _load_existing_predictions(predictions_path)
+    predictions = list(existing.values())
+    total = len(test_set)
+    errors = 0
+
+    for i, entry in enumerate(test_set):
+        study_id = entry["study_id"]
+        if study_id in existing:
+            continue
+
+        t0 = time.time()
+        try:
+            resp = req_lib.post(
+                f"{endpoint}/generate_report",
+                json={"image_path": entry["image_path"]},
+                timeout=120,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            report = data.get("report", "")
+            gen_time = data.get("generation_time_ms", 0)
+        except Exception as e:
+            logger.error(f"[{i+1}/{total}] Failed study {study_id}: {e}")
+            report = ""
+            gen_time = 0
+            errors += 1
+
+        pred = {
+            "study_id": study_id,
+            "report_pred": report,
+            "generation_time_ms": gen_time,
+            "wall_time_ms": (time.time() - t0) * 1000,
+        }
+        predictions.append(pred)
+        existing[study_id] = pred
+
+    _save_predictions(predictions_path, predictions)
+    _print_summary("MedVersa", predictions, errors, predictions_path)
+
+
 # ─── CXR Agent ───────────────────────────────────────────────────────────────
 
 
@@ -1003,10 +1153,18 @@ def _save_grounded_images(predictions: list, test_set: list, output_dir: Path):
         except Exception:
             font = ImageFont.load_default()
 
+        # Get the final report text to filter groundings
+        report_text = pred.get("report_pred", "").lower()
+
         for idx, g in enumerate(groundings):
             finding = g.get("finding", "")
             bbox = g.get("bbox", [])
             if len(bbox) != 4:
+                continue
+
+            # Skip groundings for findings not mentioned in the final report
+            if finding and finding.lower() not in report_text:
+                logger.debug(f"Skipping grounding '{finding}' — not in final report for {sid}")
                 continue
 
             color = colors[idx % len(colors)]
@@ -1159,7 +1317,7 @@ Examples:
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["prepare", "chexone", "agent", "sonnet", "score", "compare"],
+        choices=["prepare", "chexone", "chexagent2", "medgemma", "medversa", "agent", "sonnet", "score", "compare"],
         help="prepare: build test set | chexone: baseline | sonnet: API-only baseline | agent: full pipeline | score: compute metrics | compare: print table",
     )
     parser.add_argument(
@@ -1223,6 +1381,9 @@ Examples:
     dispatch = {
         "prepare": prepare_test_set,
         "chexone": run_chexone,
+        "chexagent2": run_chexagent2,
+        "medgemma": run_medgemma,
+        "medversa": run_medversa,
         "sonnet": run_sonnet_only,
         "agent": run_agent_eval,
         "score": score_predictions,
