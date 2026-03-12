@@ -1196,10 +1196,16 @@ def _save_grounded_images(predictions: list, test_set: list, output_dir: Path):
             if len(bbox) != 4:
                 continue
 
-            # Skip groundings for findings not mentioned in the final report
-            if finding and finding.lower() not in report_text:
-                logger.debug(f"Skipping grounding '{finding}' — not in final report for {sid}")
-                continue
+            # Skip groundings for findings not mentioned in the final report.
+            # Use keyword matching: finding matches if majority of its
+            # significant words (3+ chars) appear anywhere in the report.
+            if finding:
+                words = [w for w in re.findall(r'[a-z]+', finding.lower()) if len(w) >= 3]
+                if words:
+                    matched = sum(1 for w in words if w in report_text)
+                    if matched / len(words) < 0.5:
+                        logger.debug(f"Skipping grounding '{finding}' — not in final report for {sid}")
+                        continue
 
             color = colors[idx % len(colors)]
             # Normalize bbox to pixel coordinates

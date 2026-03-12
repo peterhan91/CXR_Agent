@@ -1,6 +1,6 @@
 # CXR Agent
 
-ReAct agent for chest X-ray report generation. Claude Sonnet 4.6 orchestrates 14 specialized CXR tools via Anthropic native tool-use, with CLEAR concept priors as structured context.
+ReAct agent for grounded chest X-ray report generation. Claude Sonnet 4.6 orchestrates 12 specialized CXR tools (from 18 defined) via Anthropic native tool-use, with CLEAR concept priors as structured context. Produces FINDINGS + IMPRESSION + GROUNDINGS with bounding boxes and segmentation masks.
 
 ## Architecture
 
@@ -9,22 +9,22 @@ ReAct agent for chest X-ray report generation. Claude Sonnet 4.6 orchestrates 14
                               |
                      Claude Sonnet 4.6 (ReAct)
                       /       |        \
-                CLEAR prior  Tools(14)  Adaptive Thinking
+                CLEAR prior  Tools(12)  Adaptive Thinking
                 (in-process)  (HTTP)    (effort: medium)
                      |
-    ┌────────────────┼────────────────────┐
-    GPU 0            GPU 1                GPU 2
-    CheXagent-2      CheXOne              MedVersa
-    :8001 (5 tools)  :8002 (1 tool)       :8004 (5 tools)
-                     BiomedParse          MedSAM3
-                     :8005 (1 tool)       :8006 (1 tool)
-                                          FactCheXcker
-                                          :8007 (1 tool)
+    ┌────────────────┼──────────────────────────┐
+    GPU 0            GPU 1                      GPU 2
+    CheXagent-2      CheXOne    CheXzero        MedGemma
+    :8001 (5 tools)  :8002      :8009            :8010 (2 tools)
+                     BiomedParse CXR Foundation  FactCheXcker
+                     :8005       :8008           :8007
 ```
 
-**How it works**: For each CXR image, the agent (1) receives CLEAR concept similarity scores as a prior, (2) calls tools autonomously via ReAct to gather evidence, and (3) synthesizes a final FINDINGS + IMPRESSION report. No hardcoded workflow — Sonnet decides which tools to call and in what order based on tool descriptions and image content.
+**How it works**: For each CXR image, the agent (1) receives CLEAR concept similarity scores as a structured prior, (2) follows a 6-phase skill workflow calling tools via ReAct to gather evidence, and (3) synthesizes a grounded FINDINGS + IMPRESSION report with bounding boxes linking findings to spatial locations.
 
-## Tools (14 total)
+## Tools
+
+### Enabled (12 tools across 7 servers)
 
 | Tool | Server | Capability |
 |------|--------|------------|
@@ -34,44 +34,62 @@ ReAct agent for chest X-ray report generation. Claude Sonnet 4.6 orchestrates 14
 | `chexagent2_classify` | :8001 | View classification, binary disease, disease identification |
 | `chexagent2_vqa` | :8001 | Visual question answering on CXR |
 | `chexone_report` | :8002 | Report generation with optional reasoning trace |
-| `medversa_report` | :8004 | Report generation with patient context (7B) |
-| `medversa_classify` | :8004 | Classification across 33 pathologies |
-| `medversa_detect` | :8004 | Abnormality detection with bounding boxes |
-| `medversa_segment` | :8004 | 2D segmentation with coverage percentage |
-| `medversa_vqa` | :8004 | Visual question answering (7B) |
-| `biomedparse_segment` | :8005 | Anatomical/pathology segmentation (lungs, opacity, pneumonia) |
-| `medsam3_segment` | :8006 | Text-guided SAM segmentation (broad vocabulary) |
-| `factchexcker_verify` | :8007 | Verify/correct measurement hallucinations in reports |
+| `medgemma_report` | :8010 | Report generation (Google MedGemma 4B) |
+| `medgemma_vqa` | :8010 | Visual question answering (Google MedGemma 4B) |
+| `chexzero_classify` | :8009 | 10-model ensemble CLIP, 14 CheXpert labels |
+| `cxr_foundation_classify` | :8008 | Google ELIXR v2 (EfficientNet-L2 + BERT), 14 CheXpert labels |
+| `biomedparse_segment` | :8005 | Text-prompted anatomical/pathology segmentation |
+| `factchexcker_verify` | :8007 | Verify/correct measurement hallucinations (ETT/carina) |
 
-## Quick Start (GPU Server)
+### Disabled (7 tools)
+
+| Tool | Reason |
+|------|--------|
+| `medversa_*` (5 tools) | Produces hallucinated outputs |
+| `medsam_segment` | Poor segmentation quality on CXR |
+| `medsam3_segment` | Replaced by BiomedParse |
+
+## Skill Workflow
+
+The agent follows a 6-phase workflow defined in `skills/grounded_report.md`:
+
+1. **Collect Reports** (3 calls, mandatory) — CheXagent-2, CheXOne, SRRG reports
+2. **Screen Pathologies** (2 calls, mandatory) — CheXzero + CXR Foundation 14-label classification
+3. **Confirm Findings** (1-3 calls) — Binary confirmation via CheXagent-2 classify/VQA. Include if 2/3 classifiers agree.
+4. **Ground Findings** (1-3 calls) — Bounding boxes (phrase grounding) + segmentation (BiomedParse) for confirmed findings
+5. **Verify** (1 call, mandatory) — FactCheXcker checks for measurement hallucinations
+6. **Write Report** — Synthesize FINDINGS + IMPRESSION + GROUNDINGS in MIMIC-CXR dictation style
+
+## Quick Start
 
 ### Prerequisites
 
-- 3x NVIDIA A6000 (or equivalent, ~48GB VRAM each)
-- ANTHROPIC_API_KEY set in environment
-- CLEAR model checkpoint at `../cxr_concept/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt`
-- CLEAR concepts at `../cxr_concept/concepts/mimic_concepts.csv` (368K MIMIC-CXR observations)
+- NVIDIA GPUs (tested on 3x A6000, ~48GB each)
+- `ANTHROPIC_API_KEY` set in environment
+- CLEAR model checkpoint at `../cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt`
+- CLEAR concepts at `../cxr_concept/CheXzero/concepts/mimic_concepts.csv`
 
 ### 1. Install
 
 ```bash
+# Main environment (all servers except CheXagent-2)
 conda create -n cxr_agent python=3.10 -y
 conda activate cxr_agent
 pip install -r requirements.txt
+pip install qwen-vl-utils  # CheXOne (Qwen2.5-VL)
 
-# For CheXOne (Qwen2.5-VL)
-pip install qwen-vl-utils
-
-# For BiomedParse
-pip install git+https://github.com/facebookresearch/detectron2.git
+# CheXagent-2 (requires transformers==4.40.0)
+conda create -n cxr_chexagent2 python=3.10 -y
+conda activate cxr_chexagent2
+pip install -r requirements_chexagent2.txt
 ```
 
-See `scripts/validate_models/GPU_SERVER_SETUP.md` for full environment setup including external repos (MedVersa, BiomedParse, MedSAM3, FactCheXcker).
+See `scripts/validate_models/GPU_SERVER_SETUP.md` for full environment setup including external repos (BiomedParse, FactCheXcker).
 
 ### 2. Launch Model Servers
 
 ```bash
-# All servers (6 processes across 3 GPUs)
+# All servers
 bash scripts/launch_servers.sh
 
 # Core only (CheXagent-2 + CheXOne)
@@ -81,28 +99,35 @@ bash scripts/launch_servers.sh --only core
 bash scripts/launch_servers.sh --stop
 ```
 
-Wait for all servers to be healthy:
+Additional servers launched manually:
+```bash
+# CheXzero (GPU 1)
+conda activate cxr_agent
+CUDA_VISIBLE_DEVICES=1 python servers/chexzero_server.py
 
+# CXR Foundation (GPU 2)
+CUDA_VISIBLE_DEVICES=2 python servers/cxr_foundation_server.py
+
+# MedGemma (GPU 2, ~8GB VRAM)
+CUDA_VISIBLE_DEVICES=2 python servers/medgemma_server.py
+```
+
+Health checks:
 ```bash
 curl http://localhost:8001/health  # CheXagent-2
 curl http://localhost:8002/health  # CheXOne
-curl http://localhost:8004/health  # MedVersa
 curl http://localhost:8005/health  # BiomedParse
-curl http://localhost:8006/health  # MedSAM3
 curl http://localhost:8007/health  # FactCheXcker
+curl http://localhost:8008/health  # CXR Foundation
+curl http://localhost:8009/health  # CheXzero
+curl http://localhost:8010/health  # MedGemma
 ```
 
 ### 3. Validate Models
 
 ```bash
-# All models
 python scripts/validate_models/validate_all.py
-
-# Specific models
 python scripts/validate_models/validate_all.py --only chexagent2 chexone clear
-
-# Skip unavailable models
-python scripts/validate_models/validate_all.py --skip biomedparse medsam3
 ```
 
 ### 4. Run the Agent
@@ -114,152 +139,223 @@ python scripts/run_agent.py --image /path/to/cxr.png
 # Directory of images
 python scripts/run_agent.py --image_dir /path/to/images/ --output results/
 
+# With clinical context and prior study
+python scripts/run_agent.py --image /path/to/cxr.png \
+  --clinical_context context.txt \
+  --prior_report prior.txt --prior_image /path/to/prior_cxr.png
+
 # Without CLEAR concept prior
 python scripts/run_agent.py --image /path/to/cxr.png --no_clear
 
+# With evolved skill
+python scripts/run_agent.py --image /path/to/cxr.png --skill_path skills/evolved_v2.md
+
 # Custom config
-python scripts/run_agent.py --image /path/to/cxr.png --config configs/config.yaml
+python scripts/run_agent.py --image /path/to/cxr.png --config configs/config_grounded.yaml
 ```
 
-Output: JSON with report, trajectory (tool calls + reasoning), and token usage saved to `results/`.
+Output: JSON with report, grounding, trajectory (tool calls + reasoning), and token usage saved to `results/`.
+
+## MIMIC-CXR Evaluation
+
+`scripts/eval_mimic.py` provides a full evaluation pipeline with 5 baselines and the agent.
+
+### Modes
+
+| Mode | Description |
+|------|-------------|
+| `prepare` | Build `test_set.json` from MIMIC-CXR-JPG metadata + reports + clinical context |
+| `chexagent2` | CheXagent-2 direct baseline (no agent, no CLEAR) |
+| `chexone` | CheXOne direct baseline |
+| `medgemma` | MedGemma direct baseline |
+| `medversa` | MedVersa direct baseline |
+| `sonnet` | Claude Sonnet 4.6 vision-only (no tools, no CLEAR) |
+| `agent` | Full CXR Agent (CLEAR + 12 tools + ReAct + skill workflow) |
+| `score` | Compute metrics on all prediction files |
+| `compare` | Side-by-side metric table across all modes |
+
+### Run Evaluation
+
+```bash
+# 1. Prepare test set (enriches with clinical context, prior studies, labs)
+python scripts/eval_mimic.py --mode prepare \
+  --mimic_cxr_dir /path/to/mimic-cxr-jpg/2.0.0 \
+  --mimic_iv_dir /path/to/mimiciv/3.1
+
+# 2. Run baselines
+python scripts/eval_mimic.py --mode chexagent2
+python scripts/eval_mimic.py --mode chexone
+python scripts/eval_mimic.py --mode medgemma
+python scripts/eval_mimic.py --mode sonnet
+
+# 3. Run agent
+python scripts/eval_mimic.py --mode agent --config configs/config_grounded.yaml
+
+# 4. Score (uses CXR-Report-Metric: RadCliQ-v1, RadGraph-F1, SembScore, BERTScore, BLEU-2)
+python scripts/eval_mimic.py --mode score --eval_sections findings  # or impression, full
+
+# 5. Compare all modes
+python scripts/eval_mimic.py --mode compare
+```
+
+### Metrics
+
+Scored via [CXR-Report-Metric](https://github.com/rajpurkarlab/CXR-Report-Metric):
+- **RadCliQ-v1** — composite radiology clinical quality (primary metric)
+- **RadGraph-F1** — semantic entity/relation correctness
+- **SembScore** — semantic embedding similarity
+- **BERTScore** — contextual token matching
+- **BLEU-2** — bigram overlap
+
+Additional metrics via evotest: RaTEScore, GREEN.
+
+### Convert for ReXrank
+
+```bash
+python scripts/convert_to_rexrank.py --predictions results/predictions_agent.json \
+  --test_set results/test_set.json --output results/rexrank/
+```
+
+## Skill Evolution (Evotest)
+
+Tree-based evolutionary optimization of the skill prompt, using 1/RadCliQ-v1 as reward.
+
+```bash
+# Train on validation set (30 patients, 10 episodes)
+python scripts/evotest_cxr.py --mode train --config configs/config_grounded.yaml
+
+# Test best evolved skill on test set (100 patients)
+python scripts/evotest_cxr.py --mode test
+
+# Resume from checkpoint
+python scripts/evotest_cxr.py --mode train --resume
+```
 
 ## Configuration
 
-`configs/config.yaml`:
+Three configs for different setups:
 
+| Config | Tools | Iterations | Use Case |
+|--------|-------|------------|----------|
+| `config_grounded.yaml` | 12 | 15 | Full grounded pipeline (primary) |
+| `config_core.yaml` | 6 | 10 | Minimal: CheXagent-2 + CheXOne only |
+
+`configs/config_grounded.yaml`:
 ```yaml
 agent:
   model: "claude-sonnet-4-6"
-  max_iterations: 10         # max ReAct loop iterations
+  max_iterations: 15         # 6-phase workflow needs 8-12 tool calls
   max_tokens: 4096           # per response (16000 when thinking is on)
   temperature: 0.0           # ignored when thinking is enabled
-  reasoning_effort: "medium" # "low", "medium", "high", or null
+  reasoning_effort: "medium" # adaptive thinking
 
 clear:
   top_k: 20                  # concepts injected as prior
 
 tools:
   chexagent2:
-    enabled: true             # set false to disable specific tools
+    enabled: true
     endpoint: "http://localhost:8001"
-  # ... (all 14 tools)
+  # ... (12 enabled, 6 disabled)
 ```
 
-Disable tools by setting `enabled: false` in config. The agent adapts — it only sees tools that are enabled.
+## CLEAR Concept Prior
+
+CLEAR (CLIP + DinoV2 dual-encoder) scores each CXR against 368K MIMIC-CXR observations via cosine similarity. The top-K concepts are injected into the system prompt as structured context, giving the agent an image-specific prior before any tool calls.
+
+- Model: DinoV2-ViT-B fine-tuned with CLIP objective
+- Vocabulary: 368K observations from MIMIC-CXR reports
+- Cache: Embeddings cached to `cache/clear/` (disk) + in-memory
+- Tool cache: All tool responses cached to `cache/tools/` (except FactCheXcker)
+
+## Conda Environments
+
+| Env | Python | Purpose |
+|-----|--------|---------|
+| `cxr_agent` | 3.10 | Main agent + most servers |
+| `cxr_chexagent2` | 3.10 | CheXagent-2 only (transformers==4.40.0) |
+| `cxr_medversa` | 3.10 | MedVersa only (transformers==4.28.1, disabled) |
+
+## GPU Allocation
+
+| GPU | Servers | VRAM |
+|-----|---------|------|
+| 0 | CheXagent-2 (:8001) | ~18 GB |
+| 1 | CheXOne (:8002) + CheXzero (:8009) + BiomedParse (:8005) | ~15 GB |
+| 2 | MedGemma (:8010, ~8 GB) + FactCheXcker (:8007) + CXR Foundation (:8008) | ~15 GB |
+
+CLEAR runs in-process on the agent's device (CPU or GPU, ~2 GB).
 
 ## Project Structure
 
 ```
 CXR_Agent/
 ├── agent/
-│   ├── react_agent.py       # ReAct loop, Anthropic API calls, adaptive thinking
-│   └── prompts.py           # System prompt, concept prior template
+│   ├── react_agent.py          # ReAct loop, Anthropic API, adaptive thinking
+│   └── prompts.py              # System prompt, CLEAR template, skill injection
 ├── clear/
-│   ├── concept_scorer.py    # CLEAR model: CLIP + DinoV2 concept scoring
-│   ├── clip_model.py        # CLIP architecture
-│   └── clip_tokenizer.py    # CLIP text tokenizer
+│   ├── concept_scorer.py       # CLEAR: CLIP + DinoV2 concept scoring
+│   ├── clip_model.py           # CLIP architecture
+│   └── clip_tokenizer.py       # CLIP text tokenizer
 ├── tools/
-│   ├── base.py              # BaseCXRTool interface (name, description, schema, run)
-│   ├── chexagent2.py        # 5 tool classes → :8001
-│   ├── chexone.py           # 1 tool class  → :8002
-│   ├── medversa.py          # 5 tool classes → :8004
-│   ├── biomedparse.py       # 1 tool class  → :8005
-│   ├── medsam3.py           # 1 tool class  → :8006
-│   └── factchexcker.py      # 1 tool class  → :8007
+│   ├── base.py                 # BaseCXRTool interface + disk/memory cache
+│   ├── chexagent2.py           # 5 tools → :8001
+│   ├── chexone.py              # 1 tool  → :8002
+│   ├── medgemma.py             # 2 tools → :8010
+│   ├── chexzero.py             # 1 tool  → :8009
+│   ├── cxr_foundation.py       # 1 tool  → :8008
+│   ├── biomedparse.py          # 1 tool  → :8005
+│   ├── factchexcker.py         # 1 tool  → :8007
+│   ├── medversa.py             # 5 tools → :8004 (disabled)
+│   ├── medsam.py               # 1 tool  → :8009 (disabled)
+│   └── medsam3.py              # 1 tool  → :8006 (disabled)
 ├── servers/
-│   ├── chexagent2_server.py # Multi-task FastAPI (report, srrg, classify, ground, vqa)
-│   ├── chexone_server.py    # FastAPI (report with optional reasoning)
-│   ├── medversa_server.py   # Multi-task FastAPI (report, classify, detect, segment, vqa)
-│   ├── biomedparse_server.py
-│   ├── medsam3_server.py
-│   └── factchexcker_server.py
-├── skills/                  # Empty — reserved for evotest evolved skills
+│   ├── chexagent2_server.py    # Multi-task: report, srrg, classify, ground, vqa
+│   ├── chexone_server.py       # Report with optional reasoning
+│   ├── medgemma_server.py      # VQA + report generation
+│   ├── chexzero_server.py      # 10-model ensemble classification
+│   ├── cxr_foundation_server.py # ELIXR v2 classification
+│   ├── biomedparse_server.py   # Text-prompted segmentation
+│   ├── factchexcker_server.py  # Measurement verification
+│   ├── medversa_server.py      # Multi-task (disabled)
+│   ├── medsam_server.py        # Bbox-prompted SAM (disabled)
+│   └── medsam3_server.py       # Text-guided SAM (disabled)
+├── skills/
+│   └── grounded_report.md      # 6-phase grounded report workflow
 ├── configs/
-│   └── config.yaml
+│   ├── config_grounded.yaml    # Full 12-tool config (primary)
+│   └── config_core.yaml        # Minimal 6-tool config
 ├── scripts/
-│   ├── run_agent.py         # Main entry point
-│   ├── launch_servers.sh    # Launch/stop all model servers
-│   ├── precompute_concepts.py
-│   └── validate_models/     # Per-model validation scripts
-└── tmp/                     # Reference code from cxr_concept and mimic_skills
+│   ├── run_agent.py            # Main entry point
+│   ├── eval_mimic.py           # MIMIC-CXR evaluation (9 modes)
+│   ├── prepare_mimic_studies.py # Enrich MIMIC-CXR with clinical context
+│   ├── score_full_metrics.py   # CXR-Report-Metric scoring
+│   ├── convert_to_rexrank.py   # Convert to ReXrank submission format
+│   ├── evotest_cxr.py          # Skill evolution via tree search
+│   ├── launch_servers.sh       # Launch/stop model servers
+│   ├── precompute_concepts.py  # Batch CLEAR embedding precomputation
+│   └── validate_models/        # Per-model validation scripts
+├── cache/
+│   ├── tools/                  # Tool response cache (disk)
+│   └── clear/                  # CLEAR embedding cache (.npy)
+└── trajectories/               # Saved agent trajectories (JSON)
 ```
 
-## GPU Allocation (3x A6000)
+## Grounded Report Output
 
-| GPU | Server | Models | VRAM Est. |
-|-----|--------|--------|-----------|
-| 0 | :8001 | CheXagent-2 (3B, multi-task) + CheXagent-2-SRRG (shared) | ~8 GB |
-| 1 | :8002, :8005 | CheXOne (3B) + BiomedParse | ~10 GB |
-| 2 | :8004, :8006, :8007 | MedVersa (7B) + MedSAM3 + FactCheXcker | ~20 GB |
+```
+FINDINGS:
+The heart is mildly enlarged. There is a small left pleural effusion.
+The lungs are clear. There is no pneumothorax.
 
-CLEAR runs in-process on whichever GPU the agent process uses (CPU also works, ~2 GB).
+IMPRESSION:
+Mild cardiomegaly with small left pleural effusion.
 
-## Next Steps
-
-### Day 1 — Grounded Reports that Beat Baselines
-
-**Goal**: Produce **grounded radiology reports** — each finding is linked to spatial locations in the CXR image via bounding boxes and/or segmentation masks — and **outperform both Sonnet API and CheXOne on all ReXrank scores** (RadCliQ-v1, RadGraph-F1, SembScore, BERTScore, BLEU-2).
+GROUNDINGS:
+[
+  {"finding": "cardiomegaly", "bbox": [0.25, 0.30, 0.75, 0.85], "tool": "chexagent2_grounding"},
+  {"finding": "left pleural effusion", "bbox": [0.55, 0.70, 0.95, 0.98], "tool": "biomedparse_segment", "coverage_pct": 4.2}
+]
+```
 
 ![Grounded report example](figures/GUI_example.png)
-
-*Grounded reports link textual findings (e.g. "Narrowed joint space", "osteophytes") to precise spatial locations in the image via bounding boxes and segmentation masks, enabling click-to-highlight verification.*
-
-**Server setup:**
-1. Clone external repos (MedVersa, BiomedParse, MedSAM3, FactCheXcker) — see `scripts/validate_models/GPU_SERVER_SETUP.md`
-2. Install environments — base conda env + per-model deps from `envs/*.txt`
-3. Download model weights — HuggingFace auto-downloads; CLEAR checkpoint is manual
-4. Validate each model — `python scripts/validate_models/validate_all.py`
-5. Launch all 6 servers — `bash scripts/launch_servers.sh`, verify health endpoints
-6. Smoke test — `python scripts/run_agent.py --image /path/to/test_cxr.png`
-
-**MIMIC-CXR evaluation (3 baselines + CXR Agent):**
-7. Prepare MIMIC-CXR test split — image paths + ground truth reports (FINDINGS + IMPRESSION) as JSON
-8. Run Sonnet API baseline — Claude Sonnet vision-only, no tools, no CLEAR prior
-9. Run CheXOne baseline — call CheXOne server directly, no agent, no CLEAR prior
-10. Run CXR Agent — full grounded pipeline via `run_agent.py`
-11. Install [CXR-Report-Metric](https://github.com/rajpurkarlab/CXR-Report-Metric) — computes all ReXrank metrics
-12. Score all — RadCliQ-v1 (primary), RadGraph-F1, SembScore, BERTScore, BLEU-2
-13. Compare — CXR Agent must beat Sonnet API and CheXOne on **every** metric
-14. If any metric falls short → iterate on agent prompts, tool strategy, and grounding integration until all metrics are exceeded
-
-**Grounded report output format:**
-```json
-{
-  "findings": "Cardiomegaly. Bilateral pleural effusions, left greater than right. No pneumothorax.",
-  "impression": "Cardiomegaly with bilateral pleural effusions.",
-  "grounding": [
-    {
-      "finding": "Cardiomegaly",
-      "boxes": [[0.25, 0.30, 0.75, 0.85]],
-      "mask": null
-    },
-    {
-      "finding": "Left pleural effusion",
-      "boxes": [[0.55, 0.70, 0.95, 0.98]],
-      "mask": "base64-encoded RLE or PNG mask"
-    },
-    {
-      "finding": "Right pleural effusion",
-      "boxes": [[0.05, 0.75, 0.45, 0.98]],
-      "mask": "base64-encoded RLE or PNG mask"
-    }
-  ]
-}
-```
-
-Each finding can be grounded via **bounding boxes**, **segmentation masks**, or both:
-- **Boxes**: `chexagent2_grounding` (phrase grounding), `medversa_detect` (abnormality detection). Normalized 0–1 `[x_min, y_min, x_max, y_max]`.
-- **Masks**: `biomedparse_segment` (anatomical/pathology segmentation), `medsam3_segment` (text-guided SAM), `medversa_segment` (2D segmentation with coverage %). Pixel-level region delineation.
-
-Boxes are fast and always available; masks provide precise spatial extent for diffuse findings (e.g. opacities, effusions, pneumonia) where a rectangle is insufficient.
-
-Deliverable: `scripts/eval_mimic.py` with `--mode sonnet` / `--mode chexone` / `--mode agent`, where agent mode produces grounded reports and beats both baselines on all ReXrank scores.
-
-### Future
-
-- **Prior + current CXR comparison**: Accept a prior CXR alongside the current study, compute CLEAR priors for both, pass both images to multi-image-capable tools (CheXagent-2, CheXOne), lift the no-comparison constraint to report interval changes.
-- **Evotest skill evolution**: The `skills/` directory and skill injection infrastructure are in place. The fixed `SYSTEM_PROMPT` contains only hard constraints. All clinical reasoning strategy is meant to be evolved via reward-driven optimization.
-- **CRIMSON / ReXrank reward wrappers**: Reward models for evolutionary skill optimization.
-- **Interactive reporting frontend**: Click on grounded findings to highlight bounding boxes and segmentation masks on the CXR.
-- **MedVersa task string verification**: Exact task parameter values need empirical testing against the MedVersa repo.
-- **ReXrank leaderboard submission**: After MIMIC-CXR eval, prepare inference script in ReXrank format (`python inference.py <input_json> <output_json> <img_root>`) and submit to ReXrank for evaluation on the private ReXGradient dataset (10K studies, 67 sites).
