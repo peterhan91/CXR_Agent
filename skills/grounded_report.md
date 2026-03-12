@@ -8,11 +8,12 @@ description: MIMIC-style CXR report generation optimized for RadCliQ-v1/RadGraph
 
 Execute these phases IN ORDER. Do not skip any mandatory step.
 
-## Phase 1: Collect Reports (3 calls — MANDATORY)
-Call all three report generators. Each provides a different clinical perspective.
+## Phase 1: Collect Reports (4 calls — MANDATORY)
+Call all four report generators. Each provides a different clinical perspective.
 1. `chexagent2_report` — free-text report
 2. `chexone_report` — second-opinion report
 3. `chexagent2_srrg_report` — structured region-by-region report
+4. `medgemma_report` — third-opinion report from MedGemma
 
 ## Phase 2: Screen All Pathologies (2 calls — MANDATORY)
 4. `chexzero_classify` — CheXzero zero-shot 14-label screening. Record all labels marked PRESENT.
