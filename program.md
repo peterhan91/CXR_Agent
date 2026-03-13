@@ -1,10 +1,10 @@
-# CXR Agent
+# CXR Agent — Evaluation
 
-Autonomous experimentation for CXR report generation. The agent reads this file, runs experiments, and iterates — no human in the loop.
+Autonomous evaluation of the CXR report generation agent across 5 datasets. Run all phases sequentially — no human in the loop.
 
 ## Goal
 
-**Maximize all 7 ReXrank metrics on MIMIC-CXR test set.** Beat ALL baselines (Sonnet API, CheXOne standalone) on ALL metrics. Use every available tool to get there.
+**Evaluate the CXR agent on 100 studies** (50 baseline + 50 follow-up from `data/eval/sample_100.json`). Measure all 7 ReXrank metrics. Compare against baselines (CheXOne-R1, MedVersa-Internal). Run ablations (with/without CLEAR).
 
 | Metric | Column | Range | Higher is Better | Measures |
 |--------|--------|-------|-------------------|----------|
@@ -16,259 +16,265 @@ Autonomous experimentation for CXR report generation. The agent reads this file,
 | RaTEScore | ratescore | [0, 1] | Yes | Factual/temporal consistency score |
 | GREEN | green_score | [0, 1] | Yes | LLM-based clinical error analysis (StanfordAIMI/GREEN-radllama2-7b) |
 
-**Primary optimization target**: 1/RadCliQ-v1 (composites BLEU-2 + BERTScore + SembScore + RadGraph). RaTEScore and GREEN are secondary but must not regress.
-
 Per study, output: report text (FINDINGS + IMPRESSION), grounded findings (JSON with bboxes), two figures (`{id}_bbox.png`, `{id}_mask.png`).
 
 ## Setup
 
-Before starting the experiment loop, complete these steps in order:
+Before starting evaluation, complete ALL steps below. Every step MUST pass. If any step fails, fix it before moving on — do NOT skip steps or proceed with a degraded setup. The human may be asleep.
 
-### Step 1: Verify tool servers (12 active)
-
-Every tool server must respond. Send a health-check request to each:
+### Step 1: Verify all 7 tool servers are alive
 
 ```bash
-# Quick health check — all should return 200
+FAIL=0
 for port in 8001 8002 8005 8007 8008 8009 8010; do
-  echo -n "Port $port: "; curl -sf http://localhost:$port/health && echo "OK" || echo "FAIL"
+  STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:$port/health)
+  if [ "$STATUS" = "200" ]; then
+    echo "Port $port: OK"
+  else
+    echo "Port $port: FAIL (HTTP $STATUS)"
+    FAIL=1
+  fi
 done
+[ "$FAIL" = "0" ] || { echo "BLOCKED: restart failed servers before continuing"; exit 1; }
 ```
 
-| Tool | Server | What it does |
-|------|--------|-------------|
-| `chexagent2_report` | :8001 | Free-text report |
-| `chexagent2_srrg_report` | :8001 | Structured report by anatomy |
-| `chexagent2_grounding` | :8001 | Bbox per finding (`task=phrase_grounding`, `phrase="..."`) |
-| `chexagent2_classify` | :8001 | Binary disease classification (`task=binary_disease`, `disease_name="..."`) |
-| `chexagent2_vqa` | :8001 | Follow-up questions |
-| `chexone_report` | :8002 | Second-opinion report (Qwen2.5-VL) |
-| `medgemma_vqa` | :8010 | Clinical VQA using MedGemma (Google 4B medical VLM) |
-| `medgemma_report` | :8010 | Third-opinion report using MedGemma |
-| `chexzero_classify` | :8009 | CheXzero zero-shot 14-label screening (CLIP ViT-B/32 + logit_scale) |
-| `cxr_foundation_classify` | :8008 | Google CXR Foundation zero-shot 14-label screening (ELIXR v2, CPU) |
-| `biomedparse_segment` | :8005 | Text-prompted segmentation (`prompts=["left lung"]`; good for anatomy, not pathology) |
-| `factchexcker_verify` | :8007 | ETT/carina position verification (LLM-based pipeline with CarinaNet) |
+If a server is down, start it using the commands in "Server startup commands" at the bottom of this file. Wait for it to load (can take 30-120s for model loading), then re-check.
+
+| Port | Server | Tools |
+|------|--------|-------|
+| 8001 | CheXagent-2 | `chexagent2_report`, `chexagent2_srrg_report`, `chexagent2_grounding`, `chexagent2_classify`, `chexagent2_vqa` |
+| 8002 | CheXOne | `chexone_report` |
+| 8005 | BiomedParse | `biomedparse_segment` |
+| 8007 | FactCheXcker | `factchexcker_verify` |
+| 8008 | CXR Foundation | `cxr_foundation_classify` |
+| 8009 | CheXzero | `chexzero_classify` |
+| 8010 | MedGemma | `medgemma_vqa`, `medgemma_report` |
 
 Plus **CLEAR concept prior** — DINOv2+CLIP cosine similarity to MIMIC-CXR concepts, injected before tool calls.
 
-**Disabled**: MedVersa (hallucinating), MedSAM (poor CXR masks), MedSAM3 (replaced).
+**Disabled as agent tools**: MedVersa (hallucinating), MedSAM (poor CXR masks), MedSAM3 (replaced). Note: MedVersa-Internal is still used as a standalone baseline in Phase 3 (direct report generation, not as an agent tool).
 
-**Note on FactCheXcker**: The full pipeline verifies ETT/carina positioning only (config limited to ETT/carina objects). For general finding verification (effusions, cardiomegaly, etc.), use the two 14-label classifiers (CheXzero + CXR Foundation) and MedGemma VQA for cross-checking.
+### Step 2: Run a real inference through every server
 
-### Step 2: Validate FactCheXcker actually catches errors
+Health endpoints only confirm the process is alive — not that the model is loaded or inference works. Send a real request to each server using a test image and verify the response is non-empty and well-formed.
 
-FactCheXcker must detect real inconsistencies — not just rubber-stamp every report as correct. Test it with a deliberately wrong report:
+Use any frontal CXR as test image. Example: first baseline study from `data/eval/sample_100.json`.
 
 ```bash
-# Send a known-bad report for a normal CXR image
-curl -X POST http://localhost:8007/verify_report \
+TEST_IMG=$(python3 -c "import json; d=json.load(open('data/eval/sample_100.json')); print(d['baseline'][0]['image_path'])")
+
+# 1. CheXagent-2 report (port 8001)
+curl -sf -X POST http://localhost:8001/predict \
   -H "Content-Type: application/json" \
-  -d '{"image_path": "<any_val_cxr_image>", "report": "Endotracheal tube tip is 2 cm above the carina."}'
+  -d "{\"image_path\": \"$TEST_IMG\", \"task\": \"report_generation\"}" | python3 -c "import sys,json; r=json.load(sys.stdin); assert len(r.get('report',''))>20, f'Empty report: {r}'; print('8001 report: OK')"
+
+# 2. CheXagent-2 grounding (port 8001)
+curl -sf -X POST http://localhost:8001/predict \
+  -H "Content-Type: application/json" \
+  -d "{\"image_path\": \"$TEST_IMG\", \"task\": \"phrase_grounding\", \"phrase\": \"heart\"}" | python3 -c "import sys,json; r=json.load(sys.stdin); print('8001 grounding: OK')"
+
+# 3. CheXOne report (port 8002)
+curl -sf -X POST http://localhost:8002/generate_report \
+  -H "Content-Type: application/json" \
+  -d "{\"image_path\": \"$TEST_IMG\"}" | python3 -c "import sys,json; r=json.load(sys.stdin); assert len(r.get('report',''))>20, f'Empty report: {r}'; print('8002 report: OK')"
+
+# 4. BiomedParse segmentation (port 8005)
+curl -sf -X POST http://localhost:8005/segment \
+  -H "Content-Type: application/json" \
+  -d "{\"image_path\": \"$TEST_IMG\", \"prompts\": [\"left lung\"]}" | python3 -c "import sys,json; r=json.load(sys.stdin); assert 'results' in r or 'masks' in r, f'Bad response: {list(r.keys())}'; print('8005 segment: OK')"
+
+# 5. FactCheXcker (port 8007) — test with ETT claim to verify full pipeline
+curl -sf -X POST http://localhost:8007/verify_report \
+  -H "Content-Type: application/json" \
+  -d "{\"image_path\": \"$TEST_IMG\", \"report\": \"Endotracheal tube tip is 2 cm above the carina.\"}" | python3 -c "import sys,json; r=json.load(sys.stdin); print(f'8007 verify: OK (changes_made={r.get(\"changes_made\",\"?\")})')"
+
+# 6. CXR Foundation classify (port 8008)
+curl -sf -X POST http://localhost:8008/classify \
+  -H "Content-Type: application/json" \
+  -d "{\"image_path\": \"$TEST_IMG\"}" | python3 -c "import sys,json; r=json.load(sys.stdin); assert 'predictions' in r or 'results' in r, f'Bad response: {list(r.keys())}'; print('8008 classify: OK')"
+
+# 7. CheXzero classify (port 8009)
+curl -sf -X POST http://localhost:8009/classify \
+  -H "Content-Type: application/json" \
+  -d "{\"image_path\": \"$TEST_IMG\"}" | python3 -c "import sys,json; r=json.load(sys.stdin); assert 'predictions' in r or 'results' in r, f'Bad response: {list(r.keys())}'; print('8009 classify: OK')"
+
+# 8. MedGemma VQA (port 8010)
+curl -sf -X POST http://localhost:8010/vqa \
+  -H "Content-Type: application/json" \
+  -d "{\"image_path\": \"$TEST_IMG\", \"question\": \"Is there a pleural effusion?\"}" | python3 -c "import sys,json; r=json.load(sys.stdin); assert len(r.get('answer',''))>0, f'Empty answer: {r}'; print('8010 vqa: OK')"
 ```
 
-**Expected**: FactCheXcker should return `changes_made: true` and correct the ETT distance. If it returns `changes_made: false`, the full pipeline is not loaded — check `full_pipeline` in the health response. Also test with a report that has no ETT claims to confirm it passes unchanged.
+**Every single check must print OK.** If any fails: check the server logs, restart the server, and re-run. Do NOT proceed with broken servers.
 
-### Step 3: Verify ReXrank scoring services
+**Note on FactCheXcker**: The full pipeline verifies ETT/carina positioning only (config limited to ETT/carina objects). For general finding verification (effusions, cardiomegaly, etc.), use CheXzero + CXR Foundation classifiers and MedGemma VQA.
 
-All 7 metrics must be computable. Test with a small dummy run:
+### Step 3: Verify ReXrank scoring pipeline
+
+All 7 metrics must be computable. Test each scoring component:
 
 ```bash
-# Verify CXR-Report-Metric (5 core metrics: BLEU-2, BERTScore, SembScore, RadGraph, RadCliQ-v1)
-cd ../ReXrank-metric/scripts/CXR-Report-Metric && conda run -n radgraph python -c "from CXRMetric.run_eval import calc_metric; print('CXR-Report-Metric OK')"
+# 1. CXR-Report-Metric (5 core metrics: BLEU-2, BERTScore, SembScore, RadGraph, RadCliQ-v1)
+cd /home/than/DeepLearning/ReXrank-metric/scripts/CXR-Report-Metric && \
+  conda run -n radgraph python -c "from CXRMetric.run_eval import calc_metric; print('CXR-Report-Metric: OK')" && \
+  cd /home/than/DeepLearning/CXR_Agent
 
-# Verify RaTEScore
-conda run -n green_score python -c "from RaTEScore import RaTEScore; print('RaTEScore OK')"
+# 2. RaTEScore
+conda run -n green_score python -c "from RaTEScore import RaTEScore; print('RaTEScore: OK')"
 
-# Verify GREEN (loads 7B model — takes ~30s first time)
-cd ../GREEN && conda run -n green_score python -c "from green_score.green import GREEN; print('GREEN OK')"
+# 3. GREEN (loads 7B model — takes ~30s first time)
+cd /home/than/DeepLearning/GREEN && \
+  conda run -n green_score python -c "from green_score.green import GREEN; print('GREEN: OK')" && \
+  cd /home/than/DeepLearning/CXR_Agent
 ```
 
-If any fail, fix the conda environment before proceeding. Scoring with missing metrics is not acceptable.
+If any fail, fix the conda environment (`radgraph` for step 1, `green_score` for steps 2-3) before proceeding. Scoring with missing metrics is NOT acceptable — all 7 are required.
 
-### Step 4: Prepare enriched data (prior studies + clinical context)
-
-The agent runs with `--use_prior` and `--use_clinical_context` enabled by default. These require enriched JSON files linking CXR studies to MIMIC-IV admissions and prior studies.
+### Step 4: Verify eval data files exist
 
 ```bash
-# Check if enriched data already exists
-ls results/eval_enriched/val_studies_enriched.json results/eval_enriched/test_studies_enriched.json 2>/dev/null
-
-# If missing, generate it (requires MIMIC-IV access):
-python scripts/prepare_mimic_studies.py \
-  --mimic_cxr_dir $MIMIC \
-  --mimic_iv_dir /home/than/physionet.org/files/mimiciv/3.1 \
-  --output results/eval_enriched/ \
-  --splits validate,test
+FAIL=0
+for f in data/eval/sample_100.json data/eval/mimic_cxr_test.json data/eval/chexpert_plus_valid.json \
+         data/eval/rexgradient_test.json data/eval/iu_xray_test.json data/eval/padchest_gr_test.json; do
+  [ -f "$f" ] && echo "$f: OK" || { echo "$f: MISSING"; FAIL=1; }
+done
+[ "$FAIL" = "0" ] || { echo "BLOCKED: regenerate missing data files"; exit 1; }
 ```
 
-The enriched JSON provides per-study: prior CXR reports, prior image paths, admission info (HPI, chief complaint, demographics, ICD codes).
+If eval data is missing, regenerate with `python scripts/prepare_eval_datasets.py --datasets all`.
 
-### Step 5: Prepare test sets and run baselines
+Note: Prior study data (image + report) is embedded in `prior_study` field of each follow-up entry — no separate enriched JSON needed for the 100-study eval.
+
+### Step 5: Verify Anthropic API key
+
+The agent uses Claude Sonnet via the Anthropic API. Confirm the key works:
 
 ```bash
-MIMIC=/home/than/physionet.org/files/mimic-cxr-jpg/2.0.0
-CFG=configs/config_grounded.yaml
-ENRICHED=results/eval_enriched/val_studies_enriched.json
-
-# Prepare validation set (10 unique patients, validate split) — if not done
-python scripts/eval_mimic.py --mode prepare --mimic_dir $MIMIC --reports_dir $MIMIC/reports \
-  --output results/eval_val/ --split validate --unique_patients --max_samples 10
-
-# Prepare test set (5 unique patients, test split) — if not done
-python scripts/eval_mimic.py --mode prepare --mimic_dir $MIMIC --reports_dir $MIMIC/reports \
-  --output results/eval_test/ --split test --unique_patients --max_samples 5
-
-# Baselines on validation set (run once)
-python scripts/eval_mimic.py --mode sonnet --output results/eval_val/ --config $CFG
-python scripts/eval_mimic.py --mode chexone --output results/eval_val/ --config $CFG
-python scripts/eval_mimic.py --mode score --output results/eval_val/
-
-# Baselines on test set (run once — needed for auto-graduation comparison)
-python scripts/eval_mimic.py --mode sonnet --output results/eval_test/ --config $CFG
-python scripts/eval_mimic.py --mode chexone --output results/eval_test/ --config $CFG
-python scripts/eval_mimic.py --mode score --output results/eval_test/
+python3 -c "
+import anthropic
+c = anthropic.Anthropic()
+r = c.messages.create(model='claude-sonnet-4-20250514', max_tokens=10, messages=[{'role':'user','content':'Say OK'}])
+print(f'Anthropic API: OK (model={r.model})')
+"
 ```
 
-### Step 6: Initialize results.tsv and confirm
+### Step 6: Dry-run the agent on 1 study
 
-Create `results.tsv` with header row and baseline results. Do NOT commit this file.
+Run the full agent pipeline on a single study to confirm everything is wired end-to-end:
 
+```bash
+# Pick first baseline study from sample_100
+python3 -c "
+import json
+d = json.load(open('data/eval/sample_100.json'))
+json.dump({'baseline': [d['baseline'][0]], 'followup': []}, open('/tmp/test_1.json', 'w'))
+print(f'Test study: {d[\"baseline\"][0][\"study_id\"]}')
+"
+
+# Run agent on that single study
+python scripts/eval_mimic.py --mode agent --input /tmp/test_1.json --track baseline \
+  --output /tmp/eval_dryrun/ --config configs/config_grounded.yaml
+
+# Verify output exists
+ls /tmp/eval_dryrun/predictions_agent.json && echo "Dry run: OK" || echo "Dry run: FAIL"
 ```
-commit	1/radcliq_v1	radgraph_f1	semb_score	bertscore_f1	bleu_2	ratescore	green_score	status	description
-—	—	—	—	—	—	—	—	baseline	sonnet api vision-only
-—	—	—	—	—	—	—	—	baseline	chexone direct
-```
 
-Once all 6 steps pass, begin the experiment loop.
+If this fails, debug the error before proceeding to batch runs. Common issues:
+- Tool server timeout → restart the server
+- API rate limit → wait and retry
+- Missing config key → check `configs/config_grounded.yaml`
 
-## What you CAN modify
-
-- `agent/prompts.py` — system prompt, templates, skill injection. **Primary lever.**
-- `agent/react_agent.py` — ReAct loop, iteration count, tool selection strategy.
-- `configs/config_grounded.yaml` — tool enablement, temperature, max_iterations.
-- `skills/*.md` — clinical reasoning skills injected into the system prompt.
-- `scripts/eval_mimic.py` — evaluation harness. Scoring logic is frozen; CLI flags and tool registration are OK to add.
-- `scripts/prepare_mimic_studies.py` — enriched data preparation.
-
-## What you CANNOT modify
-
-- `tools/*.py` and `servers/*.py` — existing tool and server implementations (adding new ones is OK).
-- `clear/` — CLEAR concept scorer.
+Once ALL 6 steps pass, proceed to the evaluation phases.
 
 ## Data splits
 
-**Validation set** (`results/eval_val/test_set.json`): 10 unique patients from MIMIC-CXR `validate` split. Use this for ALL iterative optimization. Prepared with `--split validate --unique_patients --max_samples 10`.
+### Large-scale eval (5 datasets, 9,488 studies)
 
-**Test set** (`results/eval_test/test_set.json`): 5 unique patients from MIMIC-CXR `test` split. Used for auto-graduation checkpoints (see below). Prepared with `--split test --unique_patients --max_samples 5`.
+Prepared by `scripts/prepare_eval_datasets.py --datasets all`. Stored in `data/eval/`.
 
-**Important**: Both sets use `--unique_patients` (one study per patient via `drop_duplicates('subject_id')`) to avoid data leakage.
+| Dataset | File | Total | Baseline | Follow-up |
+|---------|------|------:|:--------:|:---------:|
+| MIMIC-CXR | `mimic_cxr_test.json` | 2,210 | 43 | 2,167 |
+| CheXpert-Plus | `chexpert_plus_valid.json` | 200 | 200 | 0 |
+| ReXGradient | `rexgradient_test.json` | 5,573 | 3,504 | 2,069 |
+| IU-Xray | `iu_xray_test.json` | 590 | 590 | 0 |
+| PadChest-GR | `padchest_gr_test.json` | 915 | 915 | 0 |
+| **TOTAL** | | **9,488** | **5,252** | **4,236** |
 
-## Running experiments
+Each study has `eval_track` field ("baseline" or "followup"). Every follow-up has `prior_study` with image path + report. Every baseline has `prior_study=None`.
+
+**Testing sample** (`data/eval/sample_100.json`): 50 baseline + 50 follow-up from unique patients (seed=42). Use this for cost-effective testing before full-scale runs.
+
+## Evaluation — run all phases sequentially
+
+After setup passes, run each phase in order. If a phase crashes, fix and retry that phase — do NOT skip it. The human may be asleep.
+
+### Phase 1: Agent on baseline CXR (50 studies)
+
+Single CXR, no prior context. Core evaluation.
 
 ```bash
-MIMIC=/home/than/physionet.org/files/mimic-cxr-jpg/2.0.0
 CFG=configs/config_grounded.yaml
-ENRICHED=results/eval_enriched/val_studies_enriched.json
 
-# Agent run on VALIDATION set (with prior study + clinical context)
-python scripts/eval_mimic.py --mode agent --output results/eval_val_iter_N/ --config $CFG \
-  --use_prior --use_clinical_context --enriched_json $ENRICHED
-
-# Score with all 7 ReXrank metrics
-python scripts/eval_mimic.py --mode score --output results/eval_val_iter_N/
-
-# Compare against baselines
-python scripts/eval_mimic.py --mode compare --output results/eval_val_iter_N/
+python scripts/eval_mimic.py --mode agent --input data/eval/sample_100.json --track baseline \
+  --output results/eval_baseline/ --config $CFG
+python scripts/eval_mimic.py --mode score --output results/eval_baseline/
 ```
 
-Extract key metrics: `cat results/eval_val_iter_N/comparison.txt`
+Print scores when done: `cat results/eval_baseline/scores_agent.json`
 
-## Logging results
+### Phase 2: Agent on follow-up CXR (50 studies)
 
-Log every experiment to `results.tsv` (tab-separated, NOT comma-separated). Do NOT commit this file.
-
-```
-commit	1/radcliq_v1	radgraph_f1	semb_score	bertscore_f1	bleu_2	ratescore	green_score	status	description
-a1b2c3d	—	—	—	—	—	—	—	keep	initial agent run with prior+context
-```
-
-Columns:
-1. Git commit hash (short, 7 chars)
-2-8. All 7 ReXrank metric values (use 0.0 for crashes)
-9. Status: `keep`, `discard`, or `crash`
-10. Short description of what this experiment tried
-
-## The experiment loop
-
-LOOP FOREVER:
-
-1. Read current state: `cat results.tsv`, check which metrics still lag baselines.
-2. Hypothesize a targeted change. **One idea per iteration.** Examples:
-   - "Reports too verbose → tighten word count in system prompt"
-   - "Low RadGraph-F1 → agent missing entities → add more classification calls"
-   - "Low BLEU-2 → wording diverges from radiology conventions → add style examples"
-   - "Low RaTEScore → temporal/factual inconsistencies → strengthen FactCheXcker usage"
-   - "Low GREEN → clinical errors (missed/false findings) → add more cross-checking between tools"
-   - "Agent not using enough tools → add explicit instructions to call all 12"
-   - "FactCheXcker always says OK → revise how the agent feeds the draft report"
-   - "Prior study context not reflected → ensure skill references prior when available"
-   - "Use MedGemma VQA to verify uncertain findings before finalizing report"
-3. Implement: edit `agent/prompts.py`, `skills/*.md`, `configs/config_grounded.yaml`, or `agent/react_agent.py`.
-4. git commit.
-5. Run on VALIDATION:
-   ```bash
-   python scripts/eval_mimic.py --mode agent --output results/eval_val_iter_N/ --config $CFG \
-     --use_prior --use_clinical_context --enriched_json $ENRICHED
-   ```
-6. Score: `python scripts/eval_mimic.py --mode score --output results/eval_val_iter_N/`
-7. Read results: `cat results/eval_val_iter_N/comparison.txt`
-8. Record in `results.tsv`.
-9. If metrics improved → **keep** the commit, advance.
-10. If metrics regressed → **discard**, `git reset --hard HEAD~1`.
-11. Repeat.
-
-**Simplicity criterion**: All else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Removing something and getting equal or better results is a great outcome. When evaluating whether to keep a change, weigh the complexity cost against the improvement magnitude.
-
-**EvoTest** (Approach B): If manual iteration stalls after 5+ rounds with no improvement, switch to automated skill evolution:
-```bash
-python scripts/evotest_cxr.py --mode full --episodes 10 \
-  --val-json results/eval_enriched/val_studies_enriched.json \
-  --test-json results/eval_enriched/test_studies_enriched.json \
-  --config $CFG --n-train 30 --n-test 100
-```
-UCB tree search + Evolver LLM generates improved skills in `skills/evo/`. After evotest, take the best skill and continue manual iteration from there.
-
-**Crashes**: If a run crashes, check the error. If it's a typo or easy fix, fix and re-run. If the idea is fundamentally broken, log `crash` in results.tsv, revert, and move on.
-
-**Timeout**: Each agent run on 10 validation CXRs should take ~10-30 minutes. If it exceeds 60 minutes, kill and discard.
-
-**NEVER STOP**: Once the loop begins, do NOT pause to ask the human anything. Do NOT ask "should I continue?" or "is this good enough?". The human may be asleep. Continue indefinitely until manually interrupted. If you run out of ideas, think harder — re-read tool outputs, try combining approaches, try radical prompt changes, try different skill strategies. The loop runs until the human stops you.
-
-**Auto-graduation**: After each iteration, check if ALL 7 val metrics beat ALL baselines. When they do:
-1. Automatically run the 5-patient test set (see FINAL TEST below).
-2. Log test results to `results.tsv` with status `test`.
-3. **Keep iterating on val** — do NOT stop. The test run is a checkpoint, not a finish line. If a later iteration improves val further, run test again.
-
-This way the human gets test results as soon as val looks good, but the agent never stops improving.
-
-## FINAL TEST
-
-Triggered automatically by auto-graduation, or manually by the human. Uses the same `results/eval_test/` directory that contains `test_set.json` and baseline predictions:
+Current CXR + prior image + prior report. Tests comparison/temporal reasoning.
 
 ```bash
-ENRICHED_TEST=results/eval_enriched/test_studies_enriched.json
-
-# Run agent on 5-patient test set
-python scripts/eval_mimic.py --mode agent --output results/eval_test/ --config $CFG \
-  --use_prior --use_clinical_context --enriched_json $ENRICHED_TEST
-
-# Score and compare against test baselines
-python scripts/eval_mimic.py --mode score --output results/eval_test/
-python scripts/eval_mimic.py --mode compare --output results/eval_test/
+python scripts/eval_mimic.py --mode agent --input data/eval/sample_100.json --track followup \
+  --output results/eval_followup/ --config $CFG
+python scripts/eval_mimic.py --mode score --output results/eval_followup/
 ```
 
-For subsequent auto-graduation runs, copy test_set.json + baseline files into `results/eval_test_iter_N/` to preserve history.
+### Phase 3: Baselines on same 50 baseline studies
+
+Run CheXOne-R1 and MedVersa-Internal on the same baseline studies for head-to-head comparison.
+
+```bash
+python scripts/eval_mimic.py --mode chexone --input data/eval/sample_100.json --track baseline \
+  --output results/eval_baseline/
+python scripts/eval_mimic.py --mode medversa --input data/eval/sample_100.json --track baseline \
+  --output results/eval_baseline/
+python scripts/eval_mimic.py --mode score --output results/eval_baseline/
+python scripts/eval_mimic.py --mode compare --output results/eval_baseline/
+```
+
+### Phase 4: CLEAR ablation
+
+Run agent with CLEAR concept scorer disabled on both tracks to measure CLEAR's contribution.
+
+```bash
+python scripts/eval_mimic.py --mode agent --input data/eval/sample_100.json --track baseline \
+  --output results/eval_baseline_noclear/ --config $CFG --no_clear
+python scripts/eval_mimic.py --mode score --output results/eval_baseline_noclear/
+
+python scripts/eval_mimic.py --mode agent --input data/eval/sample_100.json --track followup \
+  --output results/eval_followup_noclear/ --config $CFG --no_clear
+python scripts/eval_mimic.py --mode score --output results/eval_followup_noclear/
+```
+
+### Phase 5: Save final summary
+
+After all phases complete, save a consolidated results table to `results/eval_summary.json` and `results/eval_summary.txt`. Include:
+- All 7 metrics for each method (agent, chexone, medversa) on baseline track
+- All 7 metrics for agent on follow-up track
+- All 7 metrics for agent with/without CLEAR on both tracks
+- Per-study cost (input/output tokens, wall time, number of ReAct steps)
+
+Also print the summary table to stdout.
+
+### Error recovery
+
+- If a server dies mid-run: restart it (see "Server startup commands"), re-run Step 2 health check, then retry the phase.
+- If API rate-limited: wait 60s and retry.
+- NEVER proceed to the next phase with partial results — the full batch must succeed.
+- After all phases complete, print a summary of all scores.
 
 ## Reference
 

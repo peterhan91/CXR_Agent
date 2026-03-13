@@ -309,6 +309,7 @@ class CXRReActAgent:
                 break
 
             # Execute each tool call and collect results
+            n_parallel = len(tool_use_blocks)
             tool_results = []
             for tool_block in tool_use_blocks:
                 result = self._execute_tool(tool_block.name, tool_block.input)
@@ -319,6 +320,7 @@ class CXRReActAgent:
                     "tool_input": result.tool_input,
                     "tool_output": result.output,
                     "duration_ms": result.duration_ms,
+                    "parallel_count": n_parallel,
                 })
                 tool_results.append({
                     "type": "tool_result",
@@ -344,6 +346,11 @@ class CXRReActAgent:
             if text_blocks:
                 reasoning = "\n".join(b.text for b in text_blocks)
                 logger.info(f"Agent reasoning: {reasoning[:200]}...")
+                trajectory.steps.append({
+                    "iteration": iteration + 1,
+                    "type": "reasoning",
+                    "text": reasoning,
+                })
 
         else:
             # Max iterations reached without final report

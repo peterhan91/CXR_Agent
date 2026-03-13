@@ -302,7 +302,7 @@ def run_chexone(args):
     import requests as req_lib
 
     output_dir = Path(args.output)
-    test_set = _load_test_set(output_dir)
+    test_set = _load_test_set(output_dir, args)
 
     endpoint = args.chexone_endpoint
     predictions_path = output_dir / "predictions_chexone.json"
@@ -364,7 +364,7 @@ def run_chexagent2(args):
     import requests as req_lib
 
     output_dir = Path(args.output)
-    test_set = _load_test_set(output_dir)
+    test_set = _load_test_set(output_dir, args)
 
     endpoint = "http://localhost:8001"
     predictions_path = output_dir / "predictions_chexagent2.json"
@@ -414,7 +414,7 @@ def run_medgemma(args):
     import requests as req_lib
 
     output_dir = Path(args.output)
-    test_set = _load_test_set(output_dir)
+    test_set = _load_test_set(output_dir, args)
 
     endpoint = "http://localhost:8010"
     predictions_path = output_dir / "predictions_medgemma.json"
@@ -464,7 +464,7 @@ def run_medversa(args):
     import requests as req_lib
 
     output_dir = Path(args.output)
-    test_set = _load_test_set(output_dir)
+    test_set = _load_test_set(output_dir, args)
 
     endpoint = "http://localhost:8004"
     predictions_path = output_dir / "predictions_medversa.json"
@@ -555,7 +555,7 @@ def run_agent_eval(args):
     from agent.react_agent import CXRReActAgent
 
     output_dir = Path(args.output)
-    test_set = _load_test_set(output_dir)
+    test_set = _load_test_set(output_dir, args)
 
     # Load enriched data if using prior/clinical context
     enriched_lookup = {}
@@ -636,10 +636,18 @@ def run_agent_eval(args):
             top_k = config.get("clear", {}).get("top_k", 20)
             concept_prior = scorer.score_image(entry["image_path"], top_k=top_k)
 
-        # Build optional context from enriched data
+        # Build optional prior context
         prior_report = ""
         prior_image_path = ""
         clinical_context = ""
+
+        # Source 1: prior_study embedded in the entry (from prepare_eval_datasets.py)
+        prior_study = entry.get("prior_study")
+        if prior_study and isinstance(prior_study, dict):
+            prior_report = prior_study.get("report", "")
+            prior_image_path = prior_study.get("image_path", "")
+
+        # Source 2: enriched data (from prepare_mimic_studies.py) — overrides if available
         enriched = enriched_lookup.get(study_id)
         if enriched:
             if args.use_prior:
@@ -688,9 +696,12 @@ def run_agent_eval(args):
         predictions.append(pred)
         existing[study_id] = pred
 
-        # Save full trajectory (tool calls, thinking, final report)
+        # Save full trajectory (CLEAR prior, tool calls, thinking, final report)
         traj_record = {
             "study_id": study_id,
+            "concept_prior": concept_prior,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
             "num_steps": n_steps,
             "wall_time_ms": wall_ms,
             "groundings": groundings,
@@ -741,7 +752,7 @@ def run_sonnet_only(args):
     from tenacity import retry, stop_after_attempt, wait_random_exponential
 
     output_dir = Path(args.output)
-    test_set = _load_test_set(output_dir)
+    test_set = _load_test_set(output_dir, args)
 
     predictions_path = output_dir / "predictions_sonnet.json"
     existing = _load_existing_predictions(predictions_path)
@@ -861,7 +872,7 @@ def score_predictions(args):
     Fallback: BLEU-1, BLEU-2, average report lengths
     """
     output_dir = Path(args.output)
-    test_set = _load_test_set(output_dir)
+    test_set = _load_test_set(output_dir, args)
     gt_by_study = {e["study_id"]: e["report_gt"] for e in test_set}
 
     eval_sections = getattr(args, "eval_sections", "full")
@@ -1067,12 +1078,60 @@ def compare_results(args):
 # ─── Shared Utilities ────────────────────────────────────────────────────────
 
 
-def _load_test_set(output_dir: Path) -> list:
-    """Load test_set.json, exit with error if not found."""
+def _load_test_set(output_dir: Path, args=None) -> list:
+    """Load test set from --input (with optional --track filter) or fallback to test_set.json.
+
+    --input supports two formats:
+      1. Dict with 'baseline' and 'followup' keys (e.g. sample_100.json)
+         → use --track to select which list(s)
+      2. Plain list of study dicts (legacy test_set.json format)
+
+    When --input is used, also copies the filtered studies to {output_dir}/test_set.json
+    so that scoring/compare modes can find them later.
+    """
+    # New path: --input flag
+    if args and getattr(args, "input", None):
+        input_path = Path(args.input)
+        if not input_path.exists():
+            logger.error(f"Input file not found: {input_path}")
+            sys.exit(1)
+        with open(input_path) as f:
+            data = json.load(f)
+
+        track = getattr(args, "track", None)
+
+        if isinstance(data, dict) and ("baseline" in data or "followup" in data):
+            # Dict format: filter by track
+            if track == "baseline":
+                test_set = data.get("baseline", [])
+            elif track == "followup":
+                test_set = data.get("followup", [])
+            else:
+                # No track specified: combine both
+                test_set = data.get("baseline", []) + data.get("followup", [])
+        elif isinstance(data, list):
+            test_set = data
+            if track:
+                test_set = [s for s in test_set if s.get("eval_track") == track]
+        else:
+            logger.error(f"Unrecognized format in {input_path}")
+            sys.exit(1)
+
+        logger.info(f"Loaded {len(test_set)} studies from {input_path}" +
+                     (f" (track={track})" if track else ""))
+
+        # Save as test_set.json in output dir so score/compare modes can find it
+        output_dir.mkdir(parents=True, exist_ok=True)
+        test_set_path = output_dir / "test_set.json"
+        with open(test_set_path, "w") as f:
+            json.dump(test_set, f, indent=2)
+        return test_set
+
+    # Legacy path: test_set.json in output dir
     test_set_path = output_dir / "test_set.json"
     if not test_set_path.exists():
         logger.error(f"Test set not found: {test_set_path}")
-        logger.error("Run --mode prepare first to build the test set.")
+        logger.error("Use --input to specify an eval data file, or run --mode prepare first.")
         sys.exit(1)
     with open(test_set_path) as f:
         test_set = json.load(f)
@@ -1409,6 +1468,18 @@ Examples:
         choices=["full", "findings", "impression"],
         help="Which report sections to evaluate: full (default), findings-only, or impression-only. "
         "Studies missing the selected section in GT are excluded.",
+    )
+
+    # Input data
+    parser.add_argument(
+        "--input",
+        help="Path to eval data JSON (e.g. data/eval/sample_100.json). "
+        "Overrides the default test_set.json lookup in --output dir.",
+    )
+    parser.add_argument(
+        "--track",
+        choices=["baseline", "followup"],
+        help="Filter studies by eval_track (only with --input)",
     )
 
     # Agent mode

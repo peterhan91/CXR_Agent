@@ -48,4 +48,6 @@ tmp/
 # Secrets
 .env
 *.key
-papers/s41591-024-03302-1.txt
+# Data and reference papers
+data/
+papers/
