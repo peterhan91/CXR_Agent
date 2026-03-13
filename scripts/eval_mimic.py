@@ -576,8 +576,9 @@ def run_agent_eval(args):
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    predictions_path = output_dir / "predictions_agent.json"
-    trajectories_path = output_dir / "trajectories_agent.jsonl"
+    suffix = "agent_noskill" if args.no_skills else "agent"
+    predictions_path = output_dir / f"predictions_{suffix}.json"
+    trajectories_path = output_dir / f"trajectories_{suffix}.jsonl"
 
     # Resume
     existing = _load_existing_predictions(predictions_path)
@@ -604,6 +605,7 @@ def run_agent_eval(args):
 
     # Initialize agent
     acfg = config.get("agent", {})
+    use_skills = not args.no_skills and config.get("skill", {}).get("enabled", True)
     agent = CXRReActAgent(
         model=acfg.get("model", "claude-sonnet-4-6"),
         max_iterations=acfg.get("max_iterations", 10),
@@ -611,6 +613,7 @@ def run_agent_eval(args):
         temperature=acfg.get("temperature", 0.0),
         tools=tools,
         reasoning_effort=acfg.get("reasoning_effort"),
+        use_skills=use_skills,
     )
 
     total = len(test_set)
@@ -1191,6 +1194,8 @@ def _save_grounded_images(predictions: list, test_set: list, output_dir: Path):
         report_text = pred.get("report_pred", "").lower()
 
         for idx, g in enumerate(groundings):
+            if not isinstance(g, dict):
+                continue
             finding = g.get("finding", "")
             bbox = g.get("bbox", [])
             if len(bbox) != 4:
@@ -1408,6 +1413,7 @@ Examples:
 
     # Agent mode
     parser.add_argument("--no_clear", action="store_true", help="Skip CLEAR concept scoring")
+    parser.add_argument("--no_skills", action="store_true", help="Run agent without skill workflow (ablation)")
     parser.add_argument("--use_prior", action="store_true", help="Feed most recent prior CXR report to agent")
     parser.add_argument("--use_clinical_context", action="store_true", help="Feed HPI + chief complaint to agent")
     parser.add_argument(
