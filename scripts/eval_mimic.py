@@ -1235,7 +1235,20 @@ def _save_grounded_images(predictions: list, test_set: list, output_dir: Path):
 
         image_path = entry["image_path"]
         try:
-            img = Image.open(image_path).convert("RGB")
+            img = Image.open(image_path)
+            # Properly handle 16-bit PNGs (PadChest-GR, RexGradient)
+            if img.mode in ("I", "I;16"):
+                import numpy as _np
+                arr = _np.array(img, dtype=_np.float64)
+                arr = arr - arr.min()
+                mx = arr.max()
+                if mx > 0:
+                    arr = (arr / mx * 255).astype(_np.uint8)
+                else:
+                    arr = _np.zeros_like(arr, dtype=_np.uint8)
+                img = Image.fromarray(arr, mode="L").convert("RGB")
+            else:
+                img = img.convert("RGB")
         except Exception as e:
             logger.warning(f"Cannot open image for {sid}: {e}")
             continue
@@ -1397,6 +1410,115 @@ def _build_tools(config: dict) -> list:
     return tools
 
 
+# ─── Regenerate grounded images with fixed bboxes ────────────────────────────
+
+
+def run_regen_grounded(args):
+    """Re-run CheXagent-2 grounding calls through the fixed server and regenerate images.
+
+    The server now pads images to square before grounding, producing correct
+    bbox coordinates for non-square images. This mode:
+    1. Loads existing predictions + test set
+    2. Re-calls /ground for each CheXagent-2 grounding
+    3. Updates bbox coords in predictions
+    4. Regenerates all grounded visualization images
+    """
+    import requests as _requests
+
+    output_dir = Path(args.output)
+    predictions_path = output_dir / "predictions_agent.json"
+    test_set_path = output_dir / "test_set.json"
+    chexagent2_url = getattr(args, "chexagent2_endpoint", "http://localhost:8001")
+
+    if not predictions_path.exists():
+        logger.error(f"No predictions found: {predictions_path}")
+        return
+    if not test_set_path.exists():
+        # Try loading from --input
+        if args.input:
+            with open(args.input) as f:
+                input_data = json.load(f)
+            if isinstance(input_data, dict) and args.track:
+                test_set = input_data[args.track]
+            elif isinstance(input_data, list):
+                test_set = input_data
+            else:
+                test_set = list(input_data.values())[0]
+        else:
+            logger.error(f"No test set found: {test_set_path}")
+            return
+    else:
+        with open(test_set_path) as f:
+            test_set = json.load(f)
+
+    with open(predictions_path) as f:
+        predictions = json.load(f)
+
+    gt_by_study = {e["study_id"]: e for e in test_set}
+
+    # Check server health
+    try:
+        resp = _requests.get(f"{chexagent2_url}/health", timeout=5)
+        resp.raise_for_status()
+        logger.info(f"CheXagent-2 server OK: {chexagent2_url}")
+    except Exception as e:
+        logger.error(f"CheXagent-2 server not reachable at {chexagent2_url}: {e}")
+        return
+
+    # Re-run all CheXagent-2 groundings
+    updated = 0
+    errors = 0
+    for pred in predictions:
+        sid = pred["study_id"]
+        entry = gt_by_study.get(sid)
+        if not entry:
+            continue
+        image_path = entry["image_path"]
+        groundings = pred.get("groundings", [])
+
+        for i, g in enumerate(groundings):
+            tool = g.get("tool", "")
+            if "chexagent2" not in tool:
+                continue  # BiomedParse bboxes are already correct
+
+            finding = g.get("finding", "")
+
+            # Parse task from tool name, e.g. "chexagent2_grounding (phrase_grounding)"
+            task_match = re.search(r'\((\w+)\)', tool)
+            task = task_match.group(1) if task_match else "phrase_grounding"
+
+            try:
+                resp = _requests.post(
+                    f"{chexagent2_url}/ground",
+                    json={
+                        "image_path": image_path,
+                        "task": task,
+                        "phrase": finding,
+                        "disease_name": finding,
+                    },
+                    timeout=60,
+                )
+                resp.raise_for_status()
+                result = resp.json()
+                boxes = result.get("boxes", [])
+                if boxes:
+                    # Use the first box (same as original behavior)
+                    box = boxes[0]
+                    g["bbox"] = [box["x_min"], box["y_min"], box["x_max"], box["y_max"]]
+                    updated += 1
+            except Exception as e:
+                logger.warning(f"Failed to re-ground '{finding}' for {sid}: {e}")
+                errors += 1
+
+    # Save updated predictions
+    _save_predictions(predictions_path, predictions)
+    logger.info(f"Updated {updated} bboxes ({errors} errors) -> {predictions_path}")
+
+    # Regenerate grounded images
+    _save_grounded_images(predictions, test_set, output_dir)
+    print(f"Regen-grounded: {updated} bboxes updated, {errors} errors")
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 
@@ -1421,8 +1543,8 @@ Examples:
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["prepare", "chexone", "chexagent2", "medgemma", "medversa", "agent", "sonnet", "score", "compare"],
-        help="prepare: build test set | chexone: baseline | sonnet: API-only baseline | agent: full pipeline | score: compute metrics | compare: print table",
+        choices=["prepare", "chexone", "chexagent2", "medgemma", "medversa", "agent", "sonnet", "score", "compare", "regen-grounded"],
+        help="prepare: build test set | chexone: baseline | sonnet: API-only baseline | agent: full pipeline | score: compute metrics | compare: print table | regen-grounded: re-run grounding + regenerate images",
     )
     parser.add_argument(
         "--output",
@@ -1459,6 +1581,13 @@ Examples:
         "--chexone_endpoint",
         default="http://localhost:8002",
         help="CheXOne server URL (default: http://localhost:8002)",
+    )
+
+    # Regen-grounded mode
+    parser.add_argument(
+        "--chexagent2_endpoint",
+        default="http://localhost:8001",
+        help="CheXagent-2 server URL (default: http://localhost:8001)",
     )
 
     # Score mode
@@ -1514,6 +1643,7 @@ Examples:
         "agent": run_agent_eval,
         "score": score_predictions,
         "compare": compare_results,
+        "regen-grounded": run_regen_grounded,
     }
 
     dispatch[args.mode](args)

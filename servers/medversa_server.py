@@ -179,6 +179,34 @@ async def lifespan(app: FastAPI):
     token = os.environ.get("HF_TOKEN", HfFolder.get_token())
     model = model_cls.from_pretrained("hyzhou/MedVersa_Internal", token=token).to(device).eval()
 
+    # Monkey-patch MedVersa's read_image to handle 16-bit PNGs properly.
+    # PIL .convert('RGB') silently clips 16-bit (mode I) images to 8-bit.
+    import utils as medversa_utils
+    from PIL import Image as _PILImage
+
+    _original_read_image = medversa_utils.read_image
+
+    def _patched_read_image(image_path, modality, task):
+        if image_path.endswith(('.jpg', '.jpeg', '.png')):
+            img = _PILImage.open(image_path)
+            if img.mode in ("I", "I;16"):
+                arr = np.array(img, dtype=np.float64)
+                arr = arr - arr.min()
+                mx = arr.max()
+                if mx > 0:
+                    arr = (arr / mx * 255).astype(np.uint8)
+                else:
+                    arr = np.zeros_like(arr, dtype=np.uint8)
+                img = _PILImage.fromarray(arr, mode="L").convert("RGB")
+            else:
+                img = img.convert("RGB")
+            return medversa_utils.load_and_preprocess_image(img, modality, task)
+        else:
+            return _original_read_image(image_path, modality, task)
+
+    medversa_utils.read_image = _patched_read_image
+    logger.info("Patched MedVersa read_image for 16-bit PNG support")
+
     state["model"] = model
     state["generate_predictions"] = generate_predictions
     logger.info("MedVersa loaded")

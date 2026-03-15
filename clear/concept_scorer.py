@@ -229,7 +229,19 @@ class CLEARConceptScorer:
         """
         from PIL import Image
 
-        img = Image.open(image_path).convert("L")  # grayscale
+        img = Image.open(image_path)
+        # Properly handle 16-bit PNGs (PadChest-GR, RexGradient)
+        if img.mode in ("I", "I;16"):
+            arr = np.array(img, dtype=np.float64)
+            arr = arr - arr.min()
+            mx = arr.max()
+            if mx > 0:
+                arr = (arr / mx * 255).astype(np.uint8)
+            else:
+                arr = np.zeros_like(arr, dtype=np.uint8)
+            img = Image.fromarray(arr, mode="L")
+        else:
+            img = img.convert("L")  # grayscale
 
         # Resize to square (matching cxr_concept/data_process.py:preprocess)
         desired_size = 320

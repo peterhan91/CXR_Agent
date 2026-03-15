@@ -538,13 +538,13 @@ def prepare_iu_xray() -> list[dict]:
     img_dir = os.path.join(IU_XRAY_DIR, "images", "images_normalized")
     all_img_files = set(os.listdir(img_dir)) if os.path.isdir(img_dir) else set()
 
-    # Map ReXrank case_id (CXR{uid}_IM-{id}) to actual file
-    # Actual files: {uid}_IM-{id}-{suffix}.dcm.png
-    # -1001 suffix = frontal, -2001 = lateral typically
-    uid_to_proj = defaultdict(list)
+    # Build frontal image lookup from projections CSV (reliable view labels)
+    frontal_by_uid = {}  # uid -> first frontal filename
     for uid, proj_list in projections.items():
         for fn, proj in proj_list:
-            uid_to_proj[uid].append((fn, proj))
+            if proj == "Frontal" and fn in all_img_files:
+                frontal_by_uid[uid] = fn
+                break  # use first frontal
 
     studies = []
     for case_id, entry in rexrank_data.items():
@@ -555,21 +555,33 @@ def prepare_iu_xray() -> list[dict]:
         if not impression:
             continue
 
-        # Map CXR{uid}_IM-{id} to actual filename
-        base = case_id.replace("CXR", "")  # 3030_IM-1405
-        matching_files = sorted(f for f in all_img_files if f.startswith(base))
+        # Map CXR{uid}_IM-{id} to uid
+        uid_match = re.match(r"CXR(\d+)_", case_id)
+        uid = uid_match.group(1) if uid_match else None
 
-        # Prefer frontal: -1001 suffix, or check projections
+        # Use projections CSV to find frontal image (not filename suffix heuristic)
         image_path = None
-        for fn in matching_files:
-            if "-1001" in fn:
-                image_path = os.path.join(img_dir, fn)
-                break
-        if not image_path and matching_files:
-            # Use first available
-            image_path = os.path.join(img_dir, matching_files[0])
-        if not image_path:
-            continue
+        if uid and uid in frontal_by_uid:
+            image_path = os.path.join(img_dir, frontal_by_uid[uid])
+        else:
+            # Fallback: match by case_id prefix, pick first file in projections
+            # labeled as Frontal
+            base = case_id.replace("CXR", "")
+            matching_files = sorted(f for f in all_img_files if f.startswith(base))
+            for fn in matching_files:
+                # Check projections CSV for this filename
+                for p_uid, proj_list in projections.items():
+                    for p_fn, proj in proj_list:
+                        if p_fn == fn and proj == "Frontal":
+                            image_path = os.path.join(img_dir, fn)
+                            break
+                    if image_path:
+                        break
+                if image_path:
+                    break
+            # Last resort: skip study if no frontal view found
+            if not image_path:
+                continue
 
         report_gt = ""
         if findings:
@@ -579,9 +591,6 @@ def prepare_iu_xray() -> list[dict]:
 
         # IU-Xray has no patient linking, so all baseline
         comparison = ""
-        # Map case_id to uid: CXR{uid}_IM-{id} -> uid
-        uid_match = re.match(r"CXR(\d+)_", case_id)
-        uid = uid_match.group(1) if uid_match else None
         if uid and uid in reports:
             comparison = reports[uid].get("comparison", "").strip()
 

@@ -29,6 +29,30 @@ import numpy as np
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
+from PIL import Image as PILImage
+
+
+def _load_cxr(image_path: str, mode: str = "RGB") -> "PILImage.Image":
+    """Load CXR image, properly normalizing 16-bit PNGs to 8-bit.
+
+    PIL's .convert() silently clips 16-bit (mode I) images to 8-bit,
+    destroying the dynamic range. PadChest-GR and RexGradient use 16-bit PNGs.
+    """
+    img = PILImage.open(image_path)
+    if img.mode in ("I", "I;16"):
+        arr = np.array(img, dtype=np.float64)
+        arr = arr - arr.min()
+        mx = arr.max()
+        if mx > 0:
+            arr = (arr / mx * 255).astype(np.uint8)
+        else:
+            arr = np.zeros_like(arr, dtype=np.uint8)
+        img = PILImage.fromarray(arr, mode="L")
+    else:
+        img = img.convert("L")
+    if mode == "RGB":
+        img = img.convert("RGB")
+    return img
 
 logger = logging.getLogger("biomedparse_server")
 
@@ -147,7 +171,7 @@ async def segment(req: SegmentRequest):
 
     model = state["model"]
     interactive_infer_image = state["interactive_infer_image"]
-    image = Image.open(req.image_path).convert("RGB")
+    image = _load_cxr(req.image_path, mode="RGB")
 
     t0 = time.time()
     pred_masks = interactive_infer_image(model, image, req.prompts)

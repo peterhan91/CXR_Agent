@@ -370,7 +370,14 @@ class CXRReActAgent:
         return trajectory
 
     def _encode_image(self, image_path: str) -> dict | None:
-        """Encode an image file as a base64 Anthropic image content block."""
+        """Encode an image file as a base64 Anthropic image content block.
+
+        16-bit PNGs (PadChest-GR, RexGradient) are always normalized to 8-bit
+        first — the Anthropic API does not render mode-I PNGs correctly.
+        If the base64 payload exceeds the Anthropic 5 MB limit, the image is
+        re-encoded as JPEG with decreasing quality until it fits.
+        """
+        _MAX_B64_BYTES = 5_242_880  # 5 MB Anthropic limit
         _SUPPORTED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
         mime_type = mimetypes.guess_type(image_path)[0]
         if mime_type not in _SUPPORTED_MIME_TYPES:
@@ -381,10 +388,49 @@ class CXRReActAgent:
             mime_type = "image/png"
         try:
             with open(image_path, "rb") as f:
-                image_data = base64.standard_b64encode(f.read()).decode("utf-8")
+                raw_bytes = f.read()
         except FileNotFoundError:
             logger.warning(f"Image file not found: {image_path}")
             return None
+
+        # Always normalize 16-bit PNGs to 8-bit before encoding
+        from PIL import Image
+        import io
+        import numpy as np
+        img = Image.open(io.BytesIO(raw_bytes))
+        if img.mode in ("I", "I;16"):
+            arr = np.array(img, dtype=np.float64)
+            arr = arr - arr.min()
+            mx = arr.max()
+            if mx > 0:
+                arr = (arr / mx * 255).astype(np.uint8)
+            else:
+                arr = np.zeros_like(arr, dtype=np.uint8)
+            img = Image.fromarray(arr, mode="L").convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            raw_bytes = buf.getvalue()
+            mime_type = "image/png"
+            logger.info(f"Converted 16-bit PNG to 8-bit: {image_path}")
+
+        image_data = base64.standard_b64encode(raw_bytes).decode("utf-8")
+
+        # If over 5 MB, re-encode as JPEG with decreasing quality
+        if len(image_data) > _MAX_B64_BYTES:
+            if img.mode != "RGB":
+                img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+            for quality in (90, 80, 70, 50):
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=quality)
+                image_data = base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+                if len(image_data) <= _MAX_B64_BYTES:
+                    logger.info(
+                        f"Compressed {image_path} to JPEG q={quality} "
+                        f"({len(image_data)/1024/1024:.1f} MB b64)"
+                    )
+                    break
+            mime_type = "image/jpeg"
+
         return {
             "type": "image",
             "source": {

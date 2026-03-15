@@ -26,6 +26,29 @@ import numpy as np
 import png
 from PIL import Image
 
+
+def _load_cxr(image_path: str, mode: str = "L") -> Image.Image:
+    """Load CXR image, properly normalizing 16-bit PNGs to 8-bit.
+
+    PIL's .convert() silently clips 16-bit (mode I) images to 8-bit,
+    destroying the dynamic range. PadChest-GR and RexGradient use 16-bit PNGs.
+    """
+    img = Image.open(image_path)
+    if img.mode in ("I", "I;16"):
+        arr = np.array(img, dtype=np.float64)
+        arr = arr - arr.min()
+        mx = arr.max()
+        if mx > 0:
+            arr = (arr / mx * 255).astype(np.uint8)
+        else:
+            arr = np.zeros_like(arr, dtype=np.uint8)
+        img = Image.fromarray(arr, mode="L")
+    else:
+        img = img.convert("L")
+    if mode == "RGB":
+        img = img.convert("RGB")
+    return img
+
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -68,7 +91,7 @@ def _image_to_tf_example(image_path: str):
     """
     import tensorflow as tf
 
-    img = Image.open(image_path).convert("L")
+    img = _load_cxr(image_path, mode="L")  # 16-bit safe
     arr = np.array(img)
 
     # Convert to uint16 and rescale to full range (matches image_utils.py)

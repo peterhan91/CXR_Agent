@@ -13,10 +13,35 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+import numpy as np
 import torch
 import uvicorn
 from fastapi import FastAPI
+from PIL import Image
 from pydantic import BaseModel
+
+
+def _load_cxr(image_path: str, mode: str = "RGB") -> Image.Image:
+    """Load CXR image, properly normalizing 16-bit PNGs to 8-bit.
+
+    PIL's .convert() silently clips 16-bit (mode I) images to 8-bit,
+    destroying the dynamic range. PadChest-GR and RexGradient use 16-bit PNGs.
+    """
+    img = Image.open(image_path)
+    if img.mode in ("I", "I;16"):
+        arr = np.array(img, dtype=np.float64)
+        arr = arr - arr.min()
+        mx = arr.max()
+        if mx > 0:
+            arr = (arr / mx * 255).astype(np.uint8)
+        else:
+            arr = np.zeros_like(arr, dtype=np.uint8)
+        img = Image.fromarray(arr, mode="L")
+    else:
+        img = img.convert("L")
+    if mode == "RGB":
+        img = img.convert("RGB")
+    return img
 
 logger = logging.getLogger("chexone_server")
 
@@ -72,11 +97,16 @@ async def generate_report(req: ReportRequest):
     if req.reasoning:
         prompt_text += REASONING_SUFFIX
 
+    # Pre-load image to handle 16-bit PNGs properly.
+    # Passing a PIL Image object bypasses qwen_vl_utils.to_rgb() which
+    # silently clips 16-bit images via .convert("RGB").
+    pil_image = _load_cxr(req.image_path, mode="RGB")
+
     messages = [
         {
             "role": "user",
             "content": [
-                {"type": "image", "image": req.image_path},
+                {"type": "image", "image": pil_image},
                 {"type": "text", "text": prompt_text},
             ],
         }

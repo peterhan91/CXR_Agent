@@ -12,11 +12,36 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+import numpy as np
 import torch
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Optional
+from PIL import Image
+
+
+def _load_cxr(image_path: str, mode: str = "RGB") -> Image.Image:
+    """Load CXR image, properly normalizing 16-bit PNGs to 8-bit.
+
+    PIL's .convert() silently clips 16-bit (mode I) images to 8-bit,
+    destroying the dynamic range. PadChest-GR and RexGradient use 16-bit PNGs.
+    """
+    img = Image.open(image_path)
+    if img.mode in ("I", "I;16"):
+        arr = np.array(img, dtype=np.float64)
+        arr = arr - arr.min()
+        mx = arr.max()
+        if mx > 0:
+            arr = (arr / mx * 255).astype(np.uint8)
+        else:
+            arr = np.zeros_like(arr, dtype=np.uint8)
+        img = Image.fromarray(arr, mode="L")
+    else:
+        img = img.convert("L")
+    if mode == "RGB":
+        img = img.convert("RGB")
+    return img
 
 logger = logging.getLogger("medgemma_server")
 
@@ -72,7 +97,7 @@ def _generate(image_path: str, prompt: str, max_new_tokens: int) -> tuple:
     model = state["model"]
     processor = state["processor"]
 
-    image = Image.open(image_path).convert("RGB")
+    image = _load_cxr(image_path, mode="RGB")
 
     messages = [
         {
