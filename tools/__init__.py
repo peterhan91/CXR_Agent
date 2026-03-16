@@ -40,7 +40,7 @@ __all__ = [
     # MedGemma (VQA + report)
     "MedGemmaVQATool",
     "MedGemmaReportTool",
-    # MedVersa (multi-task) — broken, kept for reference
+    # MedVersa (multi-task)
     "MedVersaReportTool",
     "MedVersaClassifyTool",
     "MedVersaDetectTool",

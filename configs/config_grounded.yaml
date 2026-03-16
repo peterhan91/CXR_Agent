@@ -1,6 +1,6 @@
 # CXR Agent Configuration — Grounded Report Generation
-# Active servers (12 tools): CheXagent-2 (5), CheXOne, MedGemma (2), CheXzero, CXR Foundation, BiomedParse, FactCheXcker
-# Disabled: MedVersa (hallucinating), MedSAM (poor CXR quality), MedSAM3 (replaced)
+# Active servers (16 tools): CheXagent-2 (5), CheXOne, MedGemma (2), MedVersa (5), CheXzero, CXR Foundation, BiomedParse, FactCheXcker
+# Disabled: MedSAM (poor CXR quality), MedSAM3 (replaced)
 
 agent:
   model: "claude-sonnet-4-6"
@@ -14,7 +14,7 @@ clear:
   concepts_path: "../cxr_concept/CheXzero/concepts/mimic_concepts.csv"
   dinov2_model_name: "dinov2_vitb14"
   image_resolution: 448
-  top_k: 20
+  top_k: 10
 
 tools:
   # Report generators
@@ -57,21 +57,21 @@ tools:
     enabled: true
     endpoint: "http://localhost:8001"
 
-  # MedVersa — DISABLED (produces hallucinated outputs)
+  # MedVersa — report only (structured prompt eliminates hallucinations)
   medversa:
-    enabled: false
+    enabled: true
     endpoint: "http://localhost:8004"
   medversa_classify:
-    enabled: false
+    enabled: true
     endpoint: "http://localhost:8004"
   medversa_detect:
-    enabled: false
+    enabled: true
     endpoint: "http://localhost:8004"
   medversa_segment:
-    enabled: false
+    enabled: true
     endpoint: "http://localhost:8004"
   medversa_vqa:
-    enabled: false
+    enabled: true
     endpoint: "http://localhost:8004"
 
   # Segmentation

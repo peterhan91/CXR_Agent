@@ -55,6 +55,8 @@ def build_tools(config: dict) -> list:
         CheXOneReportTool,
         CheXzeroClassifyTool,
         CXRFoundationClassifyTool,
+        MedGemmaVQATool,
+        MedGemmaReportTool,
         MedVersaReportTool,
         MedVersaClassifyTool,
         MedVersaDetectTool,
@@ -77,6 +79,8 @@ def build_tools(config: dict) -> list:
         "chexagent2_grounding": CheXagent2GroundingTool,
         "chexagent2_vqa": CheXagent2VQATool,
         "chexone": CheXOneReportTool,
+        "medgemma_vqa": MedGemmaVQATool,
+        "medgemma_report": MedGemmaReportTool,
         "chexzero": CheXzeroClassifyTool,
         "cxr_foundation": CXRFoundationClassifyTool,
         "medversa": MedVersaReportTool,
@@ -170,7 +174,8 @@ def main():
         help="Path to config file",
     )
     parser.add_argument("--output", type=str, default="results/", help="Output directory")
-    parser.add_argument("--no_clear", action="store_true", help="Skip CLEAR concept scoring")
+    parser.add_argument("--no_clear", action="store_true",
+                        help="(deprecated) CLEAR is always enabled")
     parser.add_argument("--no_skills", action="store_true", help="Run without skill files")
     parser.add_argument("--skill_path", type=str, help="Path to evolved skill file")
     parser.add_argument("--prior_report", type=str, help="Path to prior CXR report text file")
@@ -183,19 +188,17 @@ def main():
     setup_logging(config.get("logging", {}).get("level", "INFO"))
     logger = logging.getLogger(__name__)
 
-    # Initialize CLEAR scorer
-    scorer = None
-    if not args.no_clear:
-        clear_config = config.get("clear", {})
-        scorer = CLEARConceptScorer(
-            model_path=clear_config.get("model_path"),
-            concepts_path=clear_config.get("concepts_path"),
-            dinov2_model_name=clear_config.get("dinov2_model_name", "dinov2_vitb14"),
-            image_resolution=clear_config.get("image_resolution", 448),
-        )
-        logger.info("Loading CLEAR model (one-time cost)...")
-        scorer.load()
-        logger.info("CLEAR model ready")
+    # Initialize CLEAR scorer (always enabled)
+    clear_config = config.get("clear", {})
+    scorer = CLEARConceptScorer(
+        model_path=clear_config.get("model_path"),
+        concepts_path=clear_config.get("concepts_path"),
+        dinov2_model_name=clear_config.get("dinov2_model_name", "dinov2_vitb14"),
+        image_resolution=clear_config.get("image_resolution", 448),
+    )
+    logger.info("Loading CLEAR model (one-time cost)...")
+    scorer.load()
+    logger.info("CLEAR model ready")
 
     # Build tools
     tools = build_tools(config)

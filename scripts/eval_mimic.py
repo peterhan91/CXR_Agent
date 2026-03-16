@@ -23,15 +23,24 @@ Five modes run in sequence — each builds on the previous:
     python scripts/eval_mimic.py --mode compare --output results/eval/
 
 Output directory structure:
-    results/eval/
-    ├── test_set.json              # Prepared test set (study_id, image_path, report_gt)
-    ├── predictions_chexone.json   # CheXOne baseline predictions
-    ├── predictions_agent.json     # CXR Agent predictions
-    ├── gt_chexone.csv             # GT reports in CXR-Report-Metric format
-    ├── pred_chexone.csv           # Predicted reports in CXR-Report-Metric format
-    ├── scores_chexone.json        # Metric scores for CheXOne
-    ├── scores_agent.json          # Metric scores for Agent
-    └── comparison.txt             # Side-by-side metric table
+    results/eval_baseline/
+    ├── test_set.json                   # Test set (from --input + --track)
+    ├── predictions_agent.json          # Agent predictions
+    ├── predictions_chexone.json        # CheXOne baseline predictions
+    └── scores/
+        ├── summary.json                # Aggregated scores table
+        ├── summary.txt                 # Human-readable scores table
+        ├── agent/
+        │   ├── findings/               # FINDINGS-only scoring
+        │   │   ├── gt.csv / pred.csv               (overall)
+        │   │   ├── gt_mimic_cxr.csv / pred_mimic_cxr.csv
+        │   │   ├── scores_overall.json
+        │   │   └── scores_mimic_cxr.json
+        │   └── reports/                # FINDINGS+IMPRESSION scoring
+        │       ├── gt.csv / pred.csv
+        │       └── ...
+        └── chexone/
+            └── ...
 """
 
 import argparse
@@ -488,7 +497,7 @@ def run_medversa(args):
                 json={
                     "image_path": entry["image_path"],
                     "context": context,
-                    "prompt": "How would you characterize the findings from <img0>?",
+                    "prompt": "Write a radiology report for <img0> with FINDINGS and IMPRESSION sections.",
                     "modality": "cxr",
                 },
                 timeout=120,
@@ -584,21 +593,19 @@ def run_agent_eval(args):
     existing = _load_existing_predictions(predictions_path)
     predictions = list(existing.values())
 
-    # CLEAR scorer
-    scorer = None
-    if not args.no_clear:
-        from clear.concept_scorer import CLEARConceptScorer
+    # CLEAR scorer (always enabled)
+    from clear.concept_scorer import CLEARConceptScorer
 
-        clear_cfg = config.get("clear", {})
-        scorer = CLEARConceptScorer(
-            model_path=clear_cfg.get("model_path"),
-            concepts_path=clear_cfg.get("concepts_path"),
-            dinov2_model_name=clear_cfg.get("dinov2_model_name", "dinov2_vitb14"),
-            image_resolution=clear_cfg.get("image_resolution", 448),
-        )
-        logger.info("Loading CLEAR model...")
-        scorer.load()
-        logger.info("CLEAR model ready")
+    clear_cfg = config.get("clear", {})
+    scorer = CLEARConceptScorer(
+        model_path=clear_cfg.get("model_path"),
+        concepts_path=clear_cfg.get("concepts_path"),
+        dinov2_model_name=clear_cfg.get("dinov2_model_name", "dinov2_vitb14"),
+        image_resolution=clear_cfg.get("image_resolution", 448),
+    )
+    logger.info("Loading CLEAR model...")
+    scorer.load()
+    logger.info("CLEAR model ready")
 
     # Build tools
     tools = _build_tools(config)
@@ -859,23 +866,34 @@ def run_sonnet_only(args):
 
 
 def score_predictions(args):
-    """Score predictions using CXR-Report-Metric (or fallback metrics).
+    """Export GT/pred CSVs for ReXrank scoring, per-dataset and per-section.
 
-    Looks for all predictions_*.json files in the output directory,
-    exports GT/pred CSVs in CXR-Report-Metric format, and computes scores.
+    For each model's predictions, exports CSVs in two section splits:
+      - findings: FINDINGS section only
+      - reports:  full report (FINDINGS + IMPRESSION)
 
-    CXR-Report-Metric (https://github.com/rajpurkarlab/CXR-Report-Metric):
-        pip install CXR-Report-Metric
-        Requires: CheXbert checkpoint, RadGraph PhysioNet access
-        Metrics: RadCliQ-v1, RadGraph-F1, SembScore, BERTScore, BLEU-2
+    And for each section split, exports:
+      - overall:      all studies combined
+      - per-dataset:  one CSV pair per dataset (mimic_cxr, rexgradient, etc.)
 
-    Fallback: BLEU-1, BLEU-2, average report lengths
+    Output structure:
+      {output_dir}/scores/{model}/
+        ├── findings/
+        │   ├── gt.csv / pred.csv              (all datasets)
+        │   ├── gt_mimic_cxr.csv / pred_mimic_cxr.csv
+        │   ├── gt_rexgradient.csv / pred_rexgradient.csv
+        │   └── ...
+        └── reports/
+            ├── gt.csv / pred.csv              (all datasets)
+            ├── gt_mimic_cxr.csv / pred_mimic_cxr.csv
+            └── ...
+
+    After exporting, run: bash scripts/score_rexrank.sh {output_dir}
+    to compute all 7 ReXrank metrics on every CSV pair.
     """
     output_dir = Path(args.output)
     test_set = _load_test_set(output_dir, args)
-    gt_by_study = {e["study_id"]: e["report_gt"] for e in test_set}
-
-    eval_sections = getattr(args, "eval_sections", "full")
+    gt_by_study = {e["study_id"]: e for e in test_set}
 
     # Find all prediction files
     pred_files = sorted(output_dir.glob("predictions_*.json"))
@@ -885,19 +903,19 @@ def score_predictions(args):
 
     for pred_path in pred_files:
         mode_name = pred_path.stem.replace("predictions_", "")
-        logger.info(f"Scoring: {mode_name} (sections={eval_sections})")
+        logger.info(f"Exporting CSVs for: {mode_name}")
 
         with open(pred_path) as f:
             preds = json.load(f)
 
-        # Build aligned GT/pred lists (skip empty predictions)
-        gt_reports = []
-        pred_reports = []
-        study_ids = []
-
+        # Build per-study records with parsed sections and dataset label
+        records = []
         for p in preds:
             sid = p["study_id"]
-            gt_full = gt_by_study.get(sid, "")
+            entry = gt_by_study.get(sid)
+            if not entry:
+                continue
+            gt_full = entry["report_gt"]
             pred_full = p.get("report_pred", "").strip()
             if not gt_full or not pred_full:
                 continue
@@ -905,61 +923,79 @@ def score_predictions(args):
             gt_findings, gt_impression = parse_report_sections(gt_full)
             pred_findings, pred_impression = parse_report_sections(pred_full)
 
-            if eval_sections == "findings":
-                # Only score findings — skip studies without GT findings
-                if not gt_findings:
-                    continue
-                gt_text = gt_findings
-                pred_text = pred_findings if pred_findings else pred_full
-            elif eval_sections == "impression":
-                # Only score impression — skip studies without GT impression
-                if not gt_impression:
-                    continue
-                gt_text = gt_impression
-                pred_text = pred_impression if pred_impression else pred_full
-            else:
-                # Full report (default)
-                gt_text = gt_full
-                pred_text = pred_full
+            dataset = entry.get("dataset", "unknown")
 
-            study_ids.append(sid)
-            gt_reports.append(gt_text)
-            pred_reports.append(pred_text)
+            records.append({
+                "study_id": sid,
+                "dataset": dataset,
+                "gt_full": gt_full.lower(),
+                "pred_full": pred_full.lower(),
+                "gt_findings": gt_findings.lower() if gt_findings else "",
+                "pred_findings": (pred_findings.lower() if pred_findings
+                                  else pred_full.lower()),
+            })
 
-        if not study_ids:
+        if not records:
             logger.warning(f"No valid predictions for {mode_name}, skipping")
             continue
 
-        logger.info(f"  {len(study_ids)} studies with valid predictions")
+        logger.info(f"  {len(records)} studies with valid predictions")
 
-        # Export CSVs for CXR-Report-Metric
-        suffix = f"_{eval_sections}" if eval_sections != "full" else ""
-        gt_csv = output_dir / f"gt_{mode_name}{suffix}.csv"
-        pred_csv = output_dir / f"pred_{mode_name}{suffix}.csv"
-        _write_report_csv(gt_csv, study_ids, gt_reports)
-        _write_report_csv(pred_csv, study_ids, pred_reports)
+        # Collect unique datasets
+        datasets = sorted(set(r["dataset"] for r in records))
 
-        # Try CXR-Report-Metric first, fall back to basic metrics
-        scores_path = output_dir / f"scores_{mode_name}{suffix}.json"
-        try:
-            from CXRMetric.run_eval import calc_metric
+        scores_root = output_dir / "scores" / mode_name
 
-            logger.info("  Using CXR-Report-Metric (RadCliQ-v1, RadGraph-F1, ...)")
-            calc_metric(str(gt_csv), str(pred_csv), str(scores_path), use_idf=True)
-            logger.info(f"  Scores saved: {scores_path}")
-        except ImportError:
-            logger.warning(
-                "  CXR-Report-Metric not installed. Using basic metrics.\n"
-                "  Install: pip install CXR-Report-Metric\n"
-                "  See: https://github.com/rajpurkarlab/CXR-Report-Metric"
+        for section in ("findings", "reports"):
+            section_dir = scores_root / section
+            section_dir.mkdir(parents=True, exist_ok=True)
+
+            # Select text based on section split
+            if section == "findings":
+                pairs = [(r["study_id"], r["dataset"], r["gt_findings"],
+                          r["pred_findings"])
+                         for r in records if r["gt_findings"]]
+            else:
+                pairs = [(r["study_id"], r["dataset"], r["gt_full"],
+                          r["pred_full"])
+                         for r in records]
+
+            if not pairs:
+                logger.warning(f"  No studies for {mode_name}/{section}")
+                continue
+
+            # Overall CSV (all datasets combined)
+            _write_report_csv(
+                section_dir / "gt.csv",
+                [p[0] for p in pairs],
+                [p[2] for p in pairs],
             )
-            _compute_basic_metrics(gt_reports, pred_reports, scores_path)
-        except Exception as e:
-            logger.error(f"  CXR-Report-Metric error: {e}")
-            logger.info("  Falling back to basic metrics")
-            _compute_basic_metrics(gt_reports, pred_reports, scores_path)
+            _write_report_csv(
+                section_dir / "pred.csv",
+                [p[0] for p in pairs],
+                [p[3] for p in pairs],
+            )
+            logger.info(f"  {section}/overall: {len(pairs)} studies")
 
-    print(f"\nScoring complete. Results in {output_dir}")
+            # Per-dataset CSVs
+            for ds in datasets:
+                ds_pairs = [p for p in pairs if p[1] == ds]
+                if not ds_pairs:
+                    continue
+                _write_report_csv(
+                    section_dir / f"gt_{ds}.csv",
+                    [p[0] for p in ds_pairs],
+                    [p[2] for p in ds_pairs],
+                )
+                _write_report_csv(
+                    section_dir / f"pred_{ds}.csv",
+                    [p[0] for p in ds_pairs],
+                    [p[3] for p in ds_pairs],
+                )
+                logger.info(f"  {section}/{ds}: {len(ds_pairs)} studies")
+
+    print(f"\nCSV export complete. Results in {output_dir}/scores/")
+    print(f"Next: bash scripts/score_rexrank.sh {output_dir}")
 
 
 def _write_report_csv(path: Path, study_ids: list, reports: list):
@@ -1590,13 +1626,13 @@ Examples:
         help="CheXagent-2 server URL (default: http://localhost:8001)",
     )
 
-    # Score mode
+    # Score mode (--eval_sections kept for backward compat but ignored;
+    # score now always exports both findings and reports splits)
     parser.add_argument(
         "--eval_sections",
         default="full",
         choices=["full", "findings", "impression"],
-        help="Which report sections to evaluate: full (default), findings-only, or impression-only. "
-        "Studies missing the selected section in GT are excluded.",
+        help="(deprecated) Score mode now always exports both findings and full report splits.",
     )
 
     # Input data
@@ -1612,7 +1648,9 @@ Examples:
     )
 
     # Agent mode
-    parser.add_argument("--no_clear", action="store_true", help="Skip CLEAR concept scoring")
+    # --no_clear kept for backward compat but ignored (CLEAR always enabled)
+    parser.add_argument("--no_clear", action="store_true",
+                        help="(deprecated) CLEAR is always enabled")
     parser.add_argument("--no_skills", action="store_true", help="Run agent without skill workflow (ablation)")
     parser.add_argument("--use_prior", action="store_true", help="Feed most recent prior CXR report to agent")
     parser.add_argument("--use_clinical_context", action="store_true", help="Feed HPI + chief complaint to agent")

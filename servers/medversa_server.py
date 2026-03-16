@@ -271,24 +271,34 @@ async def segment_2d(req: SegmentRequest):
     seg_mask_2d, output_text, gen_time = _generate(
         req.image_path, req.context, req.prompt, req.modality, "2d segmentation",
     )
-    summary = _mask_summary(seg_mask_2d)
+
+    # seg_mask_2d is a list of masks (one per image) — take first
+    mask = None
+    if seg_mask_2d is not None:
+        if isinstance(seg_mask_2d, list) and len(seg_mask_2d) > 0:
+            mask = np.array(seg_mask_2d[0])
+        else:
+            mask = np.array(seg_mask_2d)
+        # Squeeze any extra dims to get (H, W)
+        mask = np.squeeze(mask)
+        if mask.ndim != 2:
+            mask = None
+
+    summary = _mask_summary(mask)
 
     # Encode mask as base64 PNG
     mask_b64 = None
-    if summary["has_mask"] and seg_mask_2d is not None:
+    if summary["has_mask"] and mask is not None:
         from PIL import Image as PILImage
-        arr = np.array(seg_mask_2d) if not isinstance(seg_mask_2d, np.ndarray) else seg_mask_2d
-        if arr.size > 0:
-            # Normalize to 0-255
-            vmin, vmax = arr.min(), arr.max()
-            if vmax > vmin:
-                normalized = ((arr - vmin) / (vmax - vmin) * 255).astype(np.uint8)
-            else:
-                normalized = (arr * 255).astype(np.uint8)
-            pil_mask = PILImage.fromarray(normalized, mode="L")
-            buf = BytesIO()
-            pil_mask.save(buf, format="PNG")
-            mask_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        vmin, vmax = mask.min(), mask.max()
+        if vmax > vmin:
+            normalized = ((mask - vmin) / (vmax - vmin) * 255).astype(np.uint8)
+        else:
+            normalized = (mask * 255).astype(np.uint8)
+        pil_mask = PILImage.fromarray(normalized, mode="L")
+        buf = BytesIO()
+        pil_mask.save(buf, format="PNG")
+        mask_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
     return SegmentResponse(
         result=output_text,

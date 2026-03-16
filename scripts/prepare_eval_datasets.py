@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Prepare standardized evaluation datasets for CXR Agent.
 
-Processes 5 CXR datasets into a unified JSON format, applying
-Flamingo-CXR-style filtering (frontal views, FINDINGS+IMPRESSION).
-Classifies each study as baseline or follow-up and links prior studies
-where available.
+Processes CXR datasets into a unified JSON format, applying
+Flamingo-CXR-style filtering (frontal views, FINDINGS section required,
+IMPRESSION optional).  Classifies each study as baseline or follow-up
+and links prior studies where available.
 
-Datasets:
-  1. MIMIC-CXR (test, 1833 studies)
-  2. CheXpert-Plus (valid, 234 studies)
-  3. ReXGradient (test, 10000 studies)
-  4. IU-Xray (test per ReXrank, 590 studies)
-  5. PadChest-GR (test, 915 studies)
+Default datasets (all require structured FINDINGS + IMPRESSION):
+  1. MIMIC-CXR (test)
+  2. CheXpert-Plus (valid)
+  3. ReXGradient (test)
+  4. IU-Xray (test per ReXrank)
+
+Excluded by default:
+  - PadChest-GR: translated sentence fragments without FINDINGS/IMPRESSION
+    structure; incompatible with report generation metrics. Can still be
+    run via --datasets padchest_gr.
 
 Output: data/eval/{dataset}_{split}.json + data/eval/summary.json
 """
@@ -103,13 +107,15 @@ def make_study(
     is_followup: bool,
     prior_study: dict | None = None,
     metadata: dict | None = None,
+    lateral_image_path: str = "",
 ) -> dict:
     """Build a standardized study dict."""
-    return {
+    d = {
         "study_id": study_id,
         "dataset": dataset,
         "split": split,
         "image_path": image_path,
+        "lateral_image_path": lateral_image_path,
         "report_gt": clean_report(report_gt),
         "findings": clean_report(findings),
         "impression": clean_report(impression),
@@ -117,6 +123,7 @@ def make_study(
         "prior_study": prior_study,
         "metadata": metadata or {},
     }
+    return d
 
 
 # ──────────────────────────── MIMIC-CXR ────────────────────────────
@@ -149,16 +156,14 @@ def prepare_mimic_cxr() -> list[dict]:
             if row["split"] == "test":
                 split_map[row["study_id"]] = row["subject_id"]
 
-    # ── Load metadata for frontal views (PA preferred over AP) ──
+    # ── Load metadata for frontal views (PA preferred over AP) + lateral ──
     study_images = {}  # study_id -> {view, dicom_id, path}
+    study_laterals = {}  # study_id -> path to lateral image
     with open(os.path.join(MIMIC_CXR_DIR, "mimic-cxr-2.0.0-metadata.csv")) as f:
         for row in csv.DictReader(f):
             sid = row["study_id"]
             view = row.get("ViewPosition", "")
-            if sid not in split_map or view not in ("PA", "AP"):
-                continue
-            # Prefer PA over AP
-            if sid in study_images and study_images[sid]["view"] == "PA":
+            if sid not in split_map:
                 continue
             subj = split_map[sid]
             p_prefix = f"p{subj[:2]}"
@@ -166,7 +171,15 @@ def prepare_mimic_cxr() -> list[dict]:
                 MIMIC_CXR_DIR, "files", p_prefix, f"p{subj}", f"s{sid}",
                 f"{row['dicom_id']}.jpg",
             )
-            study_images[sid] = {"view": view, "path": img_path, "dicom_id": row["dicom_id"]}
+            if view in ("PA", "AP"):
+                # Prefer PA over AP
+                if sid in study_images and study_images[sid]["view"] == "PA":
+                    continue
+                study_images[sid] = {"view": view, "path": img_path, "dicom_id": row["dicom_id"]}
+            elif view in ("LATERAL", "LL"):
+                # Store first lateral per study
+                if sid not in study_laterals:
+                    study_laterals[sid] = img_path
 
     # ── Load CheXpert labels ──
     chexpert_labels = {}
@@ -197,12 +210,16 @@ def prepare_mimic_cxr() -> list[dict]:
         with open(report_path) as f:
             report = f.read()
 
-        # Must have FINDINGS or IMPRESSION
+        # Must have FINDINGS (required); IMPRESSION optional
         report_upper = report.upper()
-        if "FINDINGS" not in report_upper and "IMPRESSION" not in report_upper:
+        if "FINDINGS" not in report_upper:
             continue
 
         findings, impression = extract_sections(report)
+
+        # Require non-empty findings section
+        if not findings.strip():
+            continue
 
         # Determine baseline vs follow-up from COMPARISON section
         comp_match = re.search(
@@ -265,13 +282,16 @@ def prepare_mimic_cxr() -> list[dict]:
             is_followup=is_followup,
             prior_study=prior_study,
             metadata=meta,
+            lateral_image_path=study_laterals.get(sid, ""),
         ))
 
     with_prior = sum(1 for s in studies if s["prior_study"])
+    with_lateral = sum(1 for s in studies if s["lateral_image_path"])
     print(f"  MIMIC-CXR: {len(studies)} studies "
           f"({sum(1 for s in studies if not s['is_followup'])} baseline, "
           f"{sum(1 for s in studies if s['is_followup'])} follow-up, "
-          f"{with_prior} with prior image+report)")
+          f"{with_prior} with prior image+report, "
+          f"{with_lateral} with lateral view)")
     return studies
 
 
@@ -317,10 +337,11 @@ def prepare_chexpert_plus() -> list[dict]:
         if entry["frontal_lateral"] and "frontal" not in entry["frontal_lateral"].lower():
             continue
 
-        # Must have at least impression
-        impression = entry["impression"].strip()
-        if not impression:
+        # Must have findings (required); impression optional
+        findings_check = entry["findings"].strip()
+        if not findings_check:
             continue
+        impression = entry["impression"].strip()
 
         # Deduplicate: one image per study (CheXpert may have multiple frontal views)
         study_key = f"{Path(entry['path']).parent.parent.name}_{Path(entry['path']).parent.name}"
@@ -409,15 +430,20 @@ def prepare_rexgradient() -> list[dict]:
             image_paths = meta.get("ImagePath", [])
             view_positions = meta.get("ImageViewPosition", [])
 
-            # Find frontal image (PA/AP only), skip lateral-only studies
+            # Find frontal image (PA/AP only) + lateral, skip lateral-only studies
             frontal_path = None
             frontal_view = None
+            lateral_path = None
             for img_p, vp in zip(image_paths, view_positions):
                 if vp in ("PA", "AP", "POSTERO_ANTERIOR", "AP (KUB)"):
-                    rel = img_p.replace("../deid_png/", "")
-                    frontal_path = os.path.join(REXGRADIENT_IMAGES, rel)
-                    frontal_view = vp
-                    break
+                    if not frontal_path:
+                        rel = img_p.replace("../deid_png/", "")
+                        frontal_path = os.path.join(REXGRADIENT_IMAGES, rel)
+                        frontal_view = vp
+                elif vp in ("LATERAL", "LL"):
+                    if not lateral_path:
+                        rel = img_p.replace("../deid_png/", "")
+                        lateral_path = os.path.join(REXGRADIENT_IMAGES, rel)
 
             if not frontal_path:
                 continue  # no frontal image available, skip
@@ -427,6 +453,7 @@ def prepare_rexgradient() -> list[dict]:
                 "split": split_name,
                 "date": str(csv_row.get("StudyDate", meta.get("StudyDate", ""))),
                 "image_path": frontal_path,
+                "lateral_image_path": lateral_path or "",
                 "view": frontal_view,
                 "findings": csv_row.get("Findings", ""),
                 "impression": csv_row.get("Impression", ""),
@@ -450,8 +477,8 @@ def prepare_rexgradient() -> list[dict]:
             findings = entry["findings"].strip()
             impression = entry["impression"].strip()
 
-            # Must have Findings + Impression
-            if not findings or not impression:
+            # Must have Findings (required); Impression optional
+            if not findings:
                 continue
 
             if not entry["image_path"]:
@@ -494,6 +521,7 @@ def prepare_rexgradient() -> list[dict]:
                 impression=impression,
                 is_followup=is_followup,
                 prior_study=prior_study,
+                lateral_image_path=entry.get("lateral_image_path", ""),
                 metadata={
                     "patient_id": pid,
                     "view_position": entry["view"],
@@ -505,10 +533,12 @@ def prepare_rexgradient() -> list[dict]:
                 },
             ))
 
+    with_lateral = sum(1 for s in studies if s["lateral_image_path"])
     print(f"  ReXGradient: {len(studies)} studies "
           f"({sum(1 for s in studies if not s['is_followup'])} baseline, "
           f"{sum(1 for s in studies if s['is_followup'])} follow-up, "
-          f"{sum(1 for s in studies if s['prior_study'])} with prior image+report)")
+          f"{sum(1 for s in studies if s['prior_study'])} with prior image+report, "
+          f"{with_lateral} with lateral view)")
     return studies
 
 
@@ -538,13 +568,15 @@ def prepare_iu_xray() -> list[dict]:
     img_dir = os.path.join(IU_XRAY_DIR, "images", "images_normalized")
     all_img_files = set(os.listdir(img_dir)) if os.path.isdir(img_dir) else set()
 
-    # Build frontal image lookup from projections CSV (reliable view labels)
+    # Build frontal + lateral image lookup from projections CSV (reliable view labels)
     frontal_by_uid = {}  # uid -> first frontal filename
+    lateral_by_uid = {}  # uid -> first lateral filename
     for uid, proj_list in projections.items():
         for fn, proj in proj_list:
-            if proj == "Frontal" and fn in all_img_files:
+            if proj == "Frontal" and fn in all_img_files and uid not in frontal_by_uid:
                 frontal_by_uid[uid] = fn
-                break  # use first frontal
+            elif proj == "Lateral" and fn in all_img_files and uid not in lateral_by_uid:
+                lateral_by_uid[uid] = fn
 
     studies = []
     for case_id, entry in rexrank_data.items():
@@ -552,7 +584,8 @@ def prepare_iu_xray() -> list[dict]:
         findings = entry.get("section_findings", "").strip()
         impression = entry.get("section_impression", "").strip()
 
-        if not impression:
+        # Must have findings (required); impression optional
+        if not findings:
             continue
 
         # Map CXR{uid}_IM-{id} to uid
@@ -594,6 +627,11 @@ def prepare_iu_xray() -> list[dict]:
         if uid and uid in reports:
             comparison = reports[uid].get("comparison", "").strip()
 
+        # Lateral view
+        lateral_path = ""
+        if uid and uid in lateral_by_uid:
+            lateral_path = os.path.join(img_dir, lateral_by_uid[uid])
+
         studies.append(make_study(
             study_id=f"iu_{case_id}",
             dataset="iu_xray",
@@ -603,6 +641,7 @@ def prepare_iu_xray() -> list[dict]:
             findings=findings,
             impression=impression,
             is_followup=False,  # No prior linking possible
+            lateral_image_path=lateral_path,
             metadata={
                 "case_id": case_id,
                 "comparison": comparison,
@@ -610,7 +649,9 @@ def prepare_iu_xray() -> list[dict]:
             },
         ))
 
-    print(f"  IU-Xray: {len(studies)} studies (all baseline, no prior linking)")
+    with_lateral = sum(1 for s in studies if s["lateral_image_path"])
+    print(f"  IU-Xray: {len(studies)} studies (all baseline, no prior linking, "
+          f"{with_lateral} with lateral view)")
     return studies
 
 
@@ -777,14 +818,17 @@ def main():
     parser.add_argument("--output", default=OUTPUT_DIR, help="Output directory")
     parser.add_argument(
         "--datasets", default="all",
-        help="Comma-separated list: mimic_cxr,chexpert_plus,rexgradient,iu_xray,padchest_gr or 'all'",
+        help="Comma-separated list: mimic_cxr,chexpert_plus,rexgradient,iu_xray (default=all 4). padchest_gr available but excluded by default.",
     )
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
 
+    # PadChest-GR excluded by default: reports are translated sentence fragments
+    # with no FINDINGS/IMPRESSION structure, incompatible with report generation
+    # metrics.  Can still be run explicitly via --datasets padchest_gr.
     datasets_to_run = args.datasets.split(",") if args.datasets != "all" else [
-        "mimic_cxr", "chexpert_plus", "rexgradient", "iu_xray", "padchest_gr",
+        "mimic_cxr", "chexpert_plus", "rexgradient", "iu_xray",
     ]
 
     all_studies = []
@@ -812,6 +856,8 @@ def main():
             followup = [s for s in studies if s.get("eval_track") == "followup"]
             with_prior = [s for s in followup if s.get("prior_study")]
 
+            with_lateral = [s for s in studies if s.get("lateral_image_path")]
+
             summary[ds_name] = {
                 "file": f"{file_name}.json",
                 "split": studies[0]["split"] if studies else "",
@@ -819,6 +865,7 @@ def main():
                 "baseline": len(baseline),
                 "followup": len(followup),
                 "with_prior": len(with_prior),
+                "with_lateral": len(with_lateral),
                 "has_findings": sum(1 for s in studies if s["findings"]),
                 "has_impression": sum(1 for s in studies if s["impression"]),
             }
@@ -848,14 +895,15 @@ def main():
     print(f"Summary saved to {summary_path}")
 
     # Print table
-    print(f"\n{'Dataset':<20} {'Split':<8} {'Total':>7} {'Base':>7} {'F/U':>7} {'Prior':>7}")
-    print("-" * 60)
+    print(f"\n{'Dataset':<20} {'Split':<8} {'Total':>7} {'Base':>7} {'F/U':>7} {'Prior':>7} {'Lat':>7}")
+    print("-" * 68)
     for ds_name, info in summary.items():
         if ds_name.startswith("_") or "error" in info:
             continue
         print(f"{ds_name:<20} {info['split']:<8} {info['total']:>7} "
-              f"{info['baseline']:>7} {info['followup']:>7} {info.get('with_prior', 0):>7}")
-    print("-" * 60)
+              f"{info['baseline']:>7} {info['followup']:>7} {info.get('with_prior', 0):>7} "
+              f"{info.get('with_lateral', 0):>7}")
+    print("-" * 68)
     print(f"{'TOTAL':<29} {total_all:>7} {total_baseline:>7} {total_followup:>7}")
 
 

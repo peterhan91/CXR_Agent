@@ -46,9 +46,16 @@ class MedVersaReportTool(BaseCXRTool):
         }
 
     def run(self, image_path: str, context: str = "") -> str:
+        if not context:
+            context = "Indication: Chest X-ray.\nComparison: None."
         resp = requests.post(
             f"{self.endpoint}/generate_report",
-            json={"image_path": image_path, "context": context},
+            json={
+                "image_path": image_path,
+                "context": context,
+                "prompt": "Write a radiology report for <img0> with FINDINGS and IMPRESSION sections.",
+                "modality": "cxr",
+            },
             timeout=180,
         )
         resp.raise_for_status()
