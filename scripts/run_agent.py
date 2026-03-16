@@ -164,6 +164,8 @@ def run_single_image(
         "output_tokens": trajectory.total_output_tokens,
         "duration_ms": trajectory.total_duration_ms,
         "trajectory": trajectory.steps,
+        "unused_tools": trajectory.unused_tools,
+        "evidence_summary": trajectory.evidence_summary,
     }
 
 

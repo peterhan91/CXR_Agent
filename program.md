@@ -130,8 +130,9 @@ Run the plain-prompt agent (no skills, no evolving) on 5 studies from each datas
 
 ```bash
 # Create 5-study samples from each dataset
+# Filter: GT report MUST contain both FINDINGS and IMPRESSION sections
 python3 -c "
-import json, os, random
+import json, os, random, re
 random.seed(42)
 
 datasets = {
@@ -142,6 +143,12 @@ datasets = {
     'padchest_gr': 'data/eval/padchest_gr_test.json',
 }
 
+def has_both_sections(study):
+    gt = study.get('report_gt', '')
+    has_findings = bool(re.search(r'FINDINGS?:', gt, re.IGNORECASE))
+    has_impression = bool(re.search(r'(IMPRESSION|CONCLUSION):', gt, re.IGNORECASE))
+    return has_findings and has_impression
+
 os.makedirs('data/eval/sample_5', exist_ok=True)
 for name, path in datasets.items():
     if not os.path.exists(path):
@@ -149,10 +156,16 @@ for name, path in datasets.items():
         continue
     d = json.load(open(path))
     studies = d if isinstance(d, list) else d.get('baseline', d.get('studies', []))
-    sample = random.sample(studies, min(5, len(studies)))
+    eligible = [s for s in studies if has_both_sections(s)]
+    print(f'{name}: {len(eligible)}/{len(studies)} have both FINDINGS + IMPRESSION')
+    if not eligible:
+        print(f'  WARNING: no eligible studies, taking best available')
+        eligible = studies
+    sample = random.sample(eligible, min(5, len(eligible)))
     out = f'data/eval/sample_5/{name}_5.json'
-    json.dump(sample, out_f:=open(out, 'w'), indent=2); out_f.close()
-    print(f'{name}: {len(sample)} studies -> {out}')
+    with open(out, 'w') as f:
+        json.dump(sample, f, indent=2)
+    print(f'  -> {len(sample)} studies saved to {out}')
 "
 ```
 

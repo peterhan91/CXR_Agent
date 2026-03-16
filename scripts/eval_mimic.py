@@ -676,11 +676,15 @@ def run_agent_eval(args):
             out_tok = trajectory.total_output_tokens
             n_steps = len(trajectory.steps)
             steps = trajectory.steps
+            unused_tools = trajectory.unused_tools
+            evidence_summary = trajectory.evidence_summary
         except Exception as e:
             logger.error(f"Agent failed for {study_id}: {e}", exc_info=True)
             report = ""
             in_tok = out_tok = n_steps = 0
             steps = []
+            unused_tools = []
+            evidence_summary = ""
             errors += 1
 
         wall_ms = (time.time() - t0) * 1000
@@ -699,6 +703,8 @@ def run_agent_eval(args):
             "output_tokens": out_tok,
             "num_steps": n_steps,
             "wall_time_ms": wall_ms,
+            "unused_tools": unused_tools,
+            "evidence_summary": evidence_summary,
         }
         predictions.append(pred)
         existing[study_id] = pred
@@ -712,6 +718,8 @@ def run_agent_eval(args):
             "num_steps": n_steps,
             "wall_time_ms": wall_ms,
             "groundings": groundings,
+            "unused_tools": unused_tools,
+            "evidence_summary": evidence_summary,
             "steps": steps,
         }
         with open(trajectories_path, "a") as f:

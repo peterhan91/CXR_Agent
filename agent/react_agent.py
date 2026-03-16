@@ -54,6 +54,8 @@ class AgentTrajectory:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_duration_ms: float = 0.0
+    unused_tools: list = field(default_factory=list)
+    evidence_summary: str = ""
 
 
 class CXRReActAgent:
@@ -384,6 +386,20 @@ class CXRReActAgent:
                 )
 
         trajectory.total_duration_ms = (time.time() - start_time) * 1000
+
+        # Log unused tools
+        used_tools = {s["tool_name"] for s in trajectory.steps if s.get("type") == "tool_call"}
+        trajectory.unused_tools = [t.name for t in self.tools if t.name not in used_tools]
+        if trajectory.unused_tools:
+            logger.info(f"Unused tools: {trajectory.unused_tools}")
+
+        # Extract evidence board final state
+        from tools.evidence_board import EvidenceBoardTool
+        for tool in self.tools:
+            if isinstance(tool, EvidenceBoardTool):
+                trajectory.evidence_summary = tool.board.list_all()
+                break
+
         return trajectory
 
     def _encode_image(self, image_path: str) -> dict | None:
