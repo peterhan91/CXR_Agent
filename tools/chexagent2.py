@@ -17,14 +17,17 @@ class CheXagent2ReportTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[REPORT GENERATOR] "
-            "Generate a free-text radiology report for a chest X-ray using CheXagent-2 (3B VLM). "
-            "Returns FINDINGS and IMPRESSION in natural radiologist-style prose. "
+            "Generate a free-text radiology report using CheXagent-2 (3B, Stanford). "
+            "Output uses category tags like [Breathing: Lungs] and **bold** for abnormals. "
+            "Trained on CheXinstruct (6.1M triplets, 28 CXR datasets). F1CheXbert avg 55.2. "
+            "Known to fabricate ETT distance measurements. "
             "WHEN TO USE: Call this first for every study to get a baseline narrative report. "
             "EXAMPLE OUTPUT: "
-            "'CheXagent-2 Report:\nFINDINGS: The heart is mildly enlarged. There is a small left pleural effusion. "
-            "Mild bibasilar atelectasis is noted. No focal consolidation or pneumothorax. "
-            "A right-sided PICC line terminates in the lower SVC.\n"
-            "IMPRESSION: Mild cardiomegaly with small left pleural effusion and bibasilar atelectasis.'"
+            "'CheXagent-2 Report:\n"
+            "[Breathing: Lungs] The lungs are clear without focal consolidation. "
+            "[Breathing: Pleura] No pleural effusion or pneumothorax is seen. "
+            "[Cardiac: Heart Size and Borders] The cardiac and mediastinal silhouettes are stable. "
+            "[Everything else: Bones] No displaced fracture is seen.'"
         )
 
     @property
@@ -63,16 +66,17 @@ class CheXagent2SRRGTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[REPORT GENERATOR] "
-            "Generate a structured radiology report organized by anatomical region "
-            "(Lungs/Airways, Pleura, Cardiovascular, Other) using CheXagent-2-SRRG. "
+            "Generate a structured report organized by anatomical region using CheXagent-2-SRRG. "
+            "Regions: Lungs and Airways, Pleura, Cardiovascular, Hila and Mediastinum, Musculoskeletal. "
             "WHEN TO USE: Call alongside chexagent2_report to get region-by-region findings — "
             "this helps you avoid missing findings in specific anatomical areas. "
             "EXAMPLE OUTPUT: "
             "'CheXagent-2-SRRG Structured Findings:\n"
-            "Lungs and Airways: Bibasilar atelectasis. No focal consolidation.\n"
-            "Pleura: Small left-sided pleural effusion. No pneumothorax.\n"
-            "Cardiovascular: The heart is mildly enlarged. Mediastinal contours are normal.\n"
-            "Other: Right PICC line with tip in the lower SVC. No acute osseous abnormality.'"
+            "Lungs and Airways:\n- Low lung volumes\n- No focal consolidation\n- No pneumothorax\n\n"
+            "Pleura:\n- No pleural effusion\n\n"
+            "Cardiovascular:\n- Normal heart size\n\n"
+            "Hila and Mediastinum:\n- Normal mediastinal contours\n- Presence of midline sternotomy wires and mediastinal clips\n\n"
+            "Musculoskeletal and Chest Wall:\n- No bony abnormalities detected'"
         )
 
     @property
@@ -112,20 +116,21 @@ class CheXagent2GroundingTool(BaseCXRTool):
         return (
             "[GROUNDING] "
             "Visually ground a finding or phrase in a chest X-ray using CheXagent-2. "
-            "Returns bounding box coordinates showing WHERE a finding is located. "
-            "Supports: phrase grounding (any text), abnormality detection (specific disease), "
-            "chest tube detection, rib fracture detection, and foreign objects detection. "
+            "Returns bounding box coordinates [0-1] showing WHERE a finding is located. "
+            "Supports: phrase_grounding (any text), abnormality (specific disease), "
+            "chest_tube, rib_fracture, foreign_objects. "
+            "Returns 'No X detected.' with empty boxes when finding is absent. "
             "WHEN TO USE: After you have confirmed a finding exists, call this to get its spatial location "
-            "for the GROUNDINGS section. Use task='phrase_grounding' + phrase for specific findings, "
-            "or task='abnormality' + disease_name for disease localization. "
-            "EXAMPLE (phrase grounding): "
+            "for the GROUNDINGS section. Use task='phrase_grounding' + phrase for specific findings. "
+            "EXAMPLE (phrase grounding, finding present): "
             "Input: {image_path: '...', task: 'phrase_grounding', phrase: 'pleural effusion'} → "
             "'CheXagent-2 Grounding (phrase_grounding):\n  Response: pleural effusion\n"
-            "  Box 1: x=[0.521, 0.943] y=[0.612, 0.891]' "
-            "EXAMPLE (abnormality): "
+            "  Box 1: x=[0.050, 0.100] y=[0.680, 0.764]\n"
+            "  Box 2: x=[0.870, 0.940] y=[0.680, 0.764]' "
+            "EXAMPLE (abnormality, finding absent): "
             "Input: {image_path: '...', task: 'abnormality', disease_name: 'cardiomegaly'} → "
-            "'CheXagent-2 Grounding (abnormality):\n  Response: cardiomegaly\n"
-            "  Box 1: x=[0.250, 0.750] y=[0.300, 0.800]'"
+            "'CheXagent-2 Grounding (abnormality):\n  Response: No cardiomegaly detected.\n"
+            "  No bounding boxes detected.'"
         )
 
     @property
@@ -195,18 +200,18 @@ class CheXagent2ClassifyTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[CLASSIFIER] "
-            "Classify a chest X-ray using CheXagent-2. Supports three modes: "
-            "'view' (PA/AP/Lateral view classification), "
-            "'binary_disease' (yes/no for a specific disease like 'cardiomegaly'), "
-            "'disease_id' (identify which diseases from a given list are present). "
+            "Classify a chest X-ray using CheXagent-2. Three modes: "
+            "'view' (PA/AP/Lateral), "
+            "'binary_disease' (yes/no for one disease), "
+            "'disease_id' (which diseases from a list are present — returns only the present ones). "
             "WHEN TO USE: Use binary_disease to confirm/deny a specific finding when classifiers disagree. "
-            "Use disease_id to check multiple specific diseases at once. "
-            "EXAMPLE (binary_disease): "
-            "Input: {image_path: '...', task: 'binary_disease', disease_name: 'cardiomegaly'} → "
-            "'CheXagent-2 Classification (binary_disease):\n  Yes, cardiomegaly is present.' "
+            "Use disease_id to check multiple diseases at once. "
             "EXAMPLE (disease_id): "
-            "Input: {image_path: '...', task: 'disease_id', disease_names: ['pneumonia', 'atelectasis', 'effusion']} → "
-            "'CheXagent-2 Classification (disease_id):\n  atelectasis, effusion'"
+            "Input: {image_path: '...', task: 'disease_id', disease_names: ['pneumonia', 'atelectasis', 'cardiomegaly', 'pleural effusion']} → "
+            "'CheXagent-2 Classification (disease_id):\n  Atelectasis' "
+            "EXAMPLE (view): "
+            "Input: {image_path: '...', task: 'view'} → "
+            "'CheXagent-2 Classification (view):\n  (b) AP'"
         )
 
     @property
@@ -268,15 +273,17 @@ class CheXagent2VQATool(BaseCXRTool):
         return (
             "[VQA] "
             "Ask a specific question about a chest X-ray using CheXagent-2. "
+            "Returns very short answers (often 1-3 words for yes/no questions). "
+            "For open-ended questions, may return tagged prose like reports. "
             "WHEN TO USE: Use for targeted follow-up when you need to resolve ambiguity — "
-            "e.g., laterality ('left or right?'), severity ('small or large?'), or device position. "
+            "e.g., laterality ('left or right?'), severity ('small or large?'), or device identification. "
             "Do NOT use for broad screening — use classifiers instead. "
             "EXAMPLE: "
-            "Input: {image_path: '...', question: 'Is the pleural effusion on the left or right side?'} → "
-            "'CheXagent-2 VQA:\n  Q: Is the pleural effusion on the left or right side?\n  A: Left side.' "
+            "Input: {question: 'Is there a pleural effusion?'} → "
+            "'CheXagent-2 VQA:\n  Q: Is there a pleural effusion?\n  A: No' "
             "EXAMPLE: "
-            "Input: {image_path: '...', question: 'What is the position of the endotracheal tube?'} → "
-            "'CheXagent-2 VQA:\n  Q: What is the position of the endotracheal tube?\n  A: The endotracheal tube tip is approximately 4 cm above the carina.'"
+            "Input: {question: 'What devices or lines are present?'} → "
+            "'CheXagent-2 VQA:\n  Q: What devices or lines are present?\n  A: Cabg grafts'"
         )
 
     @property

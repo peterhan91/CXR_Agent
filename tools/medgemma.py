@@ -18,13 +18,15 @@ class MedGemmaVQATool(BaseCXRTool):
         return (
             "[VQA] "
             "Ask a clinical question about a chest X-ray using MedGemma "
-            "(Google's 4B medical vision-language model). "
+            "(Google 4B, Gemma 3 + MedSigLIP). "
+            "Returns verbose paragraph-length answers with caveats and reasoning. "
             "WHEN TO USE: Use as a tiebreaker when CheXagent-2 VQA and classifiers disagree on a finding. "
             "Provides an independent third opinion from a different model family (Google vs Stanford). "
             "EXAMPLE: "
-            "Input: {image_path: '...', question: 'Is there consolidation in the right lower lobe?'} → "
-            "'MedGemma VQA:\nQ: Is there consolidation in the right lower lobe?\n"
-            "A: There is no definite consolidation in the right lower lobe. There is minor atelectasis at the right base.'"
+            "Input: {question: 'Is there a pleural effusion?'} → "
+            "'MedGemma VQA:\nQ: Is there a pleural effusion?\n"
+            "A: Based on the chest X-ray provided, there is no obvious pleural effusion. "
+            "The costophrenic angles appear clear, and there is no blunting of the pleural surfaces.'"
         )
 
     @property
@@ -68,14 +70,16 @@ class MedGemmaReportTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[REPORT GENERATOR] "
-            "Generate a radiology report using MedGemma (Google's 4B medical "
-            "vision-language model). "
+            "Generate a radiology report using MedGemma (Google 4B, Gemma 3 + MedSigLIP). "
+            "Output is markdown-formatted with **bold** headers and bullet points. "
+            "RadGraph F1 27-30. 81% of reports judged sufficient by radiologist. "
             "WHEN TO USE: Call as a third-opinion report when chexagent2_report and chexone_report "
             "disagree on key findings. NOT needed for every study — only when the first two reports conflict. "
             "EXAMPLE OUTPUT: "
-            "'MedGemma Report:\nThe cardiac silhouette is at the upper limits of normal. "
-            "The lungs are clear bilaterally without consolidation, effusion, or pneumothorax. "
-            "No acute osseous abnormalities.'"
+            "'MedGemma Report:\nThis is an AP upright chest X-ray.\n\n**Key Findings:**\n"
+            "*   **Heart Size:** The heart appears to be mildly enlarged.\n"
+            "*   **Lungs:** The lungs are clear, with no evidence of consolidation, pleural effusion, or pneumothorax.\n"
+            "*   **Post-surgical changes:** There are surgical clips in the mediastinum.'"
         )
 
     @property

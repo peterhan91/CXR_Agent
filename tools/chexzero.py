@@ -17,15 +17,18 @@ class CheXzeroClassifyTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[CLASSIFIER] "
-            "Zero-shot chest X-ray classification using CheXzero (10-model CLIP ensemble). "
-            "Classifies all 14 CheXpert pathologies in one call with majority vote. Very reliable. "
+            "Zero-shot CXR classification using CheXzero (10-model ViT-B/32 CLIP ensemble). "
+            "Classifies all 14 CheXpert pathologies in one call via majority vote. ~0.1s inference. "
+            "Mean AUC 0.897 on CheXpert. Strongest: Edema (0.961), Pleural Effusion (0.958). "
+            "Weakest: Atelectasis (0.798). May false-positive on Lung Lesion and Fracture. "
             "WHEN TO USE: Call this early (in parallel with chexagent2_report) as a systematic screen. "
             "The binary present/absent labels tell you what to look for in the reports and what to verify. "
             "EXAMPLE OUTPUT: "
             "'CheXzero 10-Model Ensemble (majority vote):\n"
-            "  PRESENT: Atelectasis, Cardiomegaly, Pleural Effusion, Support Devices\n"
-            "  ABSENT:  Consolidation, Edema, Enlarged Cardiomediastinum, Fracture, "
-            "Lung Lesion, Lung Opacity, No Finding, Pleural Other, Pneumonia, Pneumothorax'"
+            "  PRESENT: Atelectasis, Lung Lesion\n"
+            "  ABSENT:  Cardiomegaly, Consolidation, Edema, Enlarged Cardiomediastinum, "
+            "Fracture, Lung Opacity, No Finding, Pleural Effusion, Pleural Other, "
+            "Pneumonia, Pneumothorax, Support Devices'"
         )
 
     @property

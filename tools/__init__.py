@@ -1,7 +1,7 @@
 """CXR Agent tool wrappers — thin HTTP clients to model servers + local tools."""
 
 from tools.base import BaseCXRTool
-from tools.evidence_board import EvidenceBoardTool
+# from tools.evidence_board import EvidenceBoardTool  # disabled
 from tools.chexagent2 import (
     CheXagent2ReportTool,
     CheXagent2SRRGTool,
@@ -28,7 +28,7 @@ from tools.medgemma import MedGemmaVQATool, MedGemmaReportTool
 __all__ = [
     "BaseCXRTool",
     # Local tools (no server)
-    "EvidenceBoardTool",
+    # "EvidenceBoardTool",  # disabled
     # CheXagent-2 (multi-task)
     "CheXagent2ReportTool",
     "CheXagent2SRRGTool",

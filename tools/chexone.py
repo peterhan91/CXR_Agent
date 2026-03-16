@@ -17,18 +17,21 @@ class CheXOneReportTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[REPORT GENERATOR] "
-            "Generate a radiology report using CheXOne (Qwen2.5-VL-3B), with optional "
-            "step-by-step reasoning. "
+            "Generate a radiology report using CheXOne (Qwen2.5-VL-3B, Stanford). "
+            "Trained with GRPO RL on CheXInstruct-v2. ReXrank top-3 on ReXGradient, top-2 on VQA. "
             "WHEN TO USE: Call this as a second-opinion report alongside chexagent2_report. "
-            "Compare both reports to identify agreements (high confidence) and disagreements (need verification). "
-            "Set reasoning=true only when you need to understand WHY a finding was reported. "
+            "Compare both to identify agreements (high confidence) and disagreements (need verification). "
+            "Set reasoning=true only when you need to understand WHY a finding was reported (~2x slower). "
             "EXAMPLE OUTPUT (reasoning=false): "
-            "'CheXOne Report (Instruct mode):\nThe lungs are clear. Heart size is normal. "
-            "No pleural effusion or pneumothorax. Mediastinal contours are unremarkable.' "
+            "'CheXOne Report (Instruct mode):\n"
+            "The sternotomy wires are stable. The lung volumes remain low. "
+            "There is no evidence of acute disease. There is no pneumonia. "
+            "There is no pleural effusion or pneumothorax identified. The cardiac silhouette is normal.' "
             "EXAMPLE OUTPUT (reasoning=true): "
-            "'CheXOne Report (Reasoning mode):\nStep 1: Examining lung fields - no consolidation or masses. "
-            "Step 2: Cardiac silhouette - normal size. Step 3: Pleural spaces - clear bilaterally.\n"
-            "Final: The lungs are clear. Heart size is normal. No pleural effusion or pneumothorax.'"
+            "'CheXOne Report (Reasoning mode):\n"
+            "**Thinking Process:**\n1. **Assess Sternotomy Wires**: The sternotomy wires appear unchanged...\n"
+            "2. **Evaluate Lung Volumes**: Both lung fields show reduced air trapping...\n"
+            "Final report: ...'"
         )
 
     @property

@@ -24,19 +24,21 @@ class BiomedParseSegmentTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[GROUNDING] "
-            "Segment anatomical structures or pathological findings in a chest X-ray "
-            "using BiomedParse. Returns coverage percentage, bounding box, and mask PNG. "
+            "Segment structures/findings in a chest X-ray using BiomedParse (Microsoft, FocalNet-Large). "
+            "Returns coverage percentage, bounding box [0-1], and mask PNG per prompt. ~0.4s inference. "
             "Verified CXR prompts: 'left lung', 'right lung', 'lung', 'lung opacity', "
-            "'viral pneumonia', 'COVID-19 infection'. "
+            "'viral pneumonia', 'COVID-19 infection'. Other prompts may work but are UNTESTED. "
+            "COVID-biased training — non-COVID pathology segmentation may be unreliable. "
             "WHEN TO USE: Use for diffuse/bilateral findings where you need extent quantification "
             "(e.g., 'how much of the lung is opacified?'). For focal findings, prefer chexagent2_grounding. "
             "EXAMPLE: "
-            "Input: {image_path: '...', prompts: ['left lung', 'lung opacity']} → "
+            "Input: {prompts: ['left lung', 'right lung', 'lung opacity']} → "
             "'BiomedParse Segmentation Results:\n"
-            "  'left lung': 18.3% coverage, bbox=[0.50, 0.15, 0.95, 0.90]\n"
+            "  'left lung': 9.6% coverage, bbox=[0.61, 0.12, 0.94, 0.67]\n"
             "    Mask saved: cache/masks/biomedparse/a1b2c3d4e5f6.png\n"
-            "  'lung opacity': 4.7% coverage, bbox=[0.55, 0.55, 0.85, 0.85]\n"
-            "    Mask saved: cache/masks/biomedparse/f6e5d4c3b2a1.png'"
+            "  'right lung': 12.1% coverage, bbox=[0.08, 0.10, 0.45, 0.70]\n"
+            "    Mask saved: cache/masks/biomedparse/b2c3d4e5f6a1.png\n"
+            "  'lung opacity': 0.0% coverage, bbox=[0.00, 0.00, 0.00, 0.00]'"
         )
 
     @property

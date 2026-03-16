@@ -1417,6 +1417,7 @@ def _build_tools(config: dict) -> list:
         MedSAMSegmentTool,
         MedSAM3SegmentTool,
         FactCheXckerVerifyTool,
+        EvidenceBoardTool,
     )
 
     tool_config = config.get("tools", {})
@@ -1442,7 +1443,10 @@ def _build_tools(config: dict) -> list:
         "factchexcker": FactCheXckerVerifyTool,
     }
 
-    tools = []
+    # Evidence board is always enabled (local, no server)
+    tools = [EvidenceBoardTool()]
+    logger.info("  Tool enabled: evidence_board (local)")
+
     for key, cls in registry.items():
         entry = tool_config.get(key, {})
         if entry.get("enabled", False):

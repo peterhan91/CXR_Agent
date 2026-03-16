@@ -24,14 +24,16 @@ class MedVersaReportTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[REPORT GENERATOR] "
-            "Generate a radiology report using MedVersa (7B generalist medical AI). "
-            "Can incorporate patient context (age, gender, indication) if provided. "
+            "Generate a radiology report using MedVersa (LLaMA-2-7B, Harvard/Stanford). "
+            "Outputs FINDINGS/IMPRESSION format. BLEU-4 17.8, RadCliQ 2.71. "
+            "71% matched/exceeded human reports. Can incorporate patient context. "
             "WHEN TO USE: Call as an additional opinion when chexagent2 and chexone reports conflict. "
-            "Particularly useful when patient context is available — pass age/gender/indication for more targeted report. "
+            "Particularly useful when patient context is available — pass age/gender/indication. "
             "EXAMPLE OUTPUT: "
-            "'MedVersa Report:\nFINDINGS: The heart is normal in size. The lungs are clear. "
-            "There is no pleural effusion or pneumothorax. The mediastinal contours are normal.\n"
-            "IMPRESSION: No acute cardiopulmonary abnormality.'"
+            "'MedVersa Report:\nFindings:The patient is status post median sternotomy. "
+            "The heart size is normal. The mediastinal and hilar contours are unremarkable. "
+            "No focal consolidation, pleural effusion or pneumothorax is identified.\n"
+            "Impression:No acute cardiopulmonary process.'"
         )
 
     @property
@@ -83,11 +85,14 @@ class MedVersaClassifyTool(BaseCXRTool):
         return (
             "[CLASSIFIER] "
             "Classify a chest X-ray for pathologies using MedVersa (7B). "
-            "Returns diagnoses from 33 supported chest pathology categories (broader than CheXpert 14). "
-            "WHEN TO USE: Call when you want to check for pathologies beyond the 14 CheXpert labels "
-            "(e.g., hernia, subcutaneous emphysema, mediastinal widening). "
-            "EXAMPLE OUTPUT: "
-            "'MedVersa Classification (33 pathologies):\n  Cardiomegaly, Pleural Effusion, Atelectasis'"
+            "Covers 41 pathology categories (broader than CheXpert 14). F1 0.615 on 33 pathologies. "
+            "WARNING: Endpoint is unreliable — may return segmentation tokens instead of labels. "
+            "WHEN TO USE: Prefer chexzero_classify and cxr_foundation_classify instead. "
+            "Only use this if you need pathologies beyond CheXpert-14 (e.g., hernia, scoliosis). "
+            "EXAMPLE OUTPUT (when working): "
+            "'MedVersa Classification (33 pathologies):\n  Cardiomegaly, Pleural Effusion, Atelectasis' "
+            "EXAMPLE OUTPUT (broken): "
+            "'MedVersa Classification (33 pathologies):\n  The segmentation mask of the cardiac silhouette is <2DSEG> .'"
         )
 
     @property
@@ -132,12 +137,12 @@ class MedVersaDetectTool(BaseCXRTool):
         return (
             "[GROUNDING] "
             "Detect and localize abnormalities in a chest X-ray using MedVersa (7B). "
-            "Returns bounding boxes around detected pathologies and structures. "
-            "WHEN TO USE: Use for open-ended abnormality detection — finds things you might not have asked about. "
-            "Different from chexagent2_grounding which requires you to specify what to look for. "
-            "EXAMPLE OUTPUT: "
-            "'MedVersa Detection:\n  Detected: cardiomegaly [0.22, 0.28, 0.78, 0.85], "
-            "pleural effusion [0.55, 0.60, 0.95, 0.95]'"
+            "Mean IoU 0.303 on CXR detection. "
+            "WARNING: Endpoint often returns segmentation tokens instead of bounding boxes. "
+            "WHEN TO USE: Prefer chexagent2_grounding for reliable bounding boxes. "
+            "Only use this for open-ended abnormality detection when chexagent2 grounding is insufficient. "
+            "EXAMPLE OUTPUT (broken): "
+            "'MedVersa Detection:\n  The segmentation mask of bounding box is <2DSEG> .'"
         )
 
     @property
@@ -190,13 +195,13 @@ class MedVersaSegmentTool(BaseCXRTool):
         return (
             "[GROUNDING] "
             "Segment regions in a chest X-ray using MedVersa (7B) 2D segmentation. "
-            "Returns pixel-level mask with coverage percentage. "
+            "Dice 0.955 on CheXmask organ segmentation. Returns coverage % and mask PNG. "
             "WHEN TO USE: Use to quantify the extent of a finding (e.g., 'how much lung is affected?'). "
-            "Similar to biomedparse_segment but uses a different model — use biomedparse for verified CXR prompts, "
-            "use this for custom/unusual segmentation queries. "
+            "Use biomedparse_segment for verified CXR prompts (lung, lung opacity). "
+            "Use this for custom/unusual segmentation queries. "
             "EXAMPLE OUTPUT: "
-            "'MedVersa 2D Segmentation:\n  Text: lung opacity segmented\n"
-            "  Coverage: 12.3% of image\n  Mask shape: [512, 512]\n"
+            "'MedVersa 2D Segmentation:\n  Text: The segmentation mask of the abnormal region is <2DSEG> .\n"
+            "  Coverage: 8.4% of image\n  Mask shape: [2544, 3056]\n"
             "  Mask saved: cache/masks/medversa/a1b2c3d4e5f6.png'"
         )
 
@@ -264,11 +269,11 @@ class MedVersaVQATool(BaseCXRTool):
         return (
             "[VQA] "
             "Ask a medical question about a chest X-ray using MedVersa (7B). "
-            "WHEN TO USE: Use as an additional VQA opinion when chexagent2_vqa and medgemma_vqa disagree, "
-            "or when you need a third verification source. "
-            "EXAMPLE: "
-            "Input: {image_path: '...', question: 'Is the cardiac silhouette enlarged?'} → "
-            "'MedVersa VQA:\n  Q: Is the cardiac silhouette enlarged?\n  A: Yes, the cardiac silhouette appears mildly enlarged.'"
+            "WARNING: VQA endpoint is unreliable — often returns gibberish or truncated text. "
+            "WHEN TO USE: Prefer chexagent2_vqa and medgemma_vqa for VQA. "
+            "Only use this as a last resort when both other VQA tools are insufficient. "
+            "EXAMPLE OUTPUT (broken): "
+            "'MedVersa VQA:\n  Q: Is there a pleural effusion?\n  A: The PIC'"
         )
 
     @property

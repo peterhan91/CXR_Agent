@@ -17,16 +17,17 @@ class CXRFoundationClassifyTool(BaseCXRTool):
     def description(self) -> str:
         return (
             "[CLASSIFIER] "
-            "Zero-shot chest X-ray classification using Google CXR Foundation (ELIXR v2). "
-            "Independent from CheXzero — uses different architecture (EfficientNet-L2 + BERT). "
+            "Zero-shot CXR classification using Google CXR Foundation (ELIXR v2, EfficientNet-L2 + BERT). "
+            "Independent from CheXzero — different architecture, different training data (821K CXRs). "
+            "Mean AUC 0.850 (13 findings). More conservative than CheXzero (fewer false positives). "
             "WHEN TO USE: Call in parallel with chexzero_classify. Compare both outputs: "
             "if both agree a finding is PRESENT → high confidence. "
             "If they disagree → use chexagent2_classify or VQA to break the tie. "
             "EXAMPLE OUTPUT: "
             "'CXR Foundation Zero-Shot Classification:\n"
-            "  PRESENT: Cardiomegaly, Pleural Effusion\n"
-            "  ABSENT:  Atelectasis, Consolidation, Edema, Enlarged Cardiomediastinum, "
-            "Fracture, Lung Lesion, Lung Opacity, No Finding, Pleural Other, Pneumonia, Pneumothorax, Support Devices'"
+            "  ABSENT:  Atelectasis, Cardiomegaly, Consolidation, Edema, Enlarged Cardiomediastinum, "
+            "Fracture, Lung Lesion, Lung Opacity, No Finding, Pleural Effusion, "
+            "Pleural Other, Pneumonia, Pneumothorax, Support Devices'"
         )
 
     @property
