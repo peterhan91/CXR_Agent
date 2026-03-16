@@ -24,7 +24,13 @@ from dataclasses import dataclass, field
 import anthropic
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
-from agent.prompts import SYSTEM_PROMPT, CONCEPT_PRIOR_TEMPLATE, SKILL_INJECTION_TEMPLATE, build_skills_prompt
+from agent.prompts import (
+    SYSTEM_PROMPT_WITH_SKILLS,
+    SYSTEM_PROMPT_PLAIN,
+    CONCEPT_PRIOR_TEMPLATE,
+    SKILL_INJECTION_TEMPLATE,
+    build_skills_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +112,15 @@ class CXRReActAgent:
         """Build the full system prompt with skills, concept priors, and optional evolved skill.
 
         Assembly order:
-        1. Base system prompt (role + principles)
-        2. Skill files (workflow, tool guidance, interpretation rules)
+        1. Base system prompt (role + principles) — variant depends on whether skills are active
+        2. Skill files (workflow, tool guidance, interpretation rules) — only if use_skills=True
         3. CLEAR concept prior for this specific image
-        4. Optional evolved skill text (for future evotest integration)
+        4. Optional evolved skill text (for evotest integration)
         """
-        parts = [SYSTEM_PROMPT]
+        # Pick the right base prompt
+        has_skills = self.use_skills or self.skill_text
+        base_prompt = SYSTEM_PROMPT_WITH_SKILLS if has_skills else SYSTEM_PROMPT_PLAIN
+        parts = [base_prompt]
 
         # Load skill files (clinical reasoning guidance)
         if self.use_skills:
@@ -149,8 +158,10 @@ class CXRReActAgent:
             logger.warning(output)
         else:
             try:
-                # Use cache for deterministic tools (skip for verify which takes variable report text)
-                if tool_name == "factchexcker_verify":
+                # Skip cache for stateful/variable-input tools
+                # - factchexcker_verify: input changes per draft
+                # - evidence_board: local stateful memory
+                if tool_name in ("factchexcker_verify", "evidence_board"):
                     output = tool.run(**tool_input)
                 else:
                     output = cached_tool_call(tool_name, tool.run, **tool_input)
@@ -215,6 +226,12 @@ class CXRReActAgent:
             image_id=image_id,
             concept_prior=concept_prior_text,
         )
+
+        # Reset evidence board for this study (fresh per run)
+        from tools.evidence_board import EvidenceBoardTool
+        for tool in self.tools:
+            if isinstance(tool, EvidenceBoardTool):
+                tool.board.reset()
 
         system_prompt = self._build_system_prompt(concept_prior_text)
 
@@ -462,8 +479,8 @@ class CXRReActAgent:
 
         # Build the task instruction text
         text_parts = [
-            f"Please analyze this chest X-ray and generate a comprehensive radiology report. "
-            f"The image file path is: {image_path}",
+            f"Generate a radiology report for this chest X-ray. "
+            f"The image file path for tool calls is: {image_path}",
         ]
 
         # Clinical context (HPI + chief complaint)
@@ -475,18 +492,9 @@ class CXRReActAgent:
             prior_section = f"\nPRIOR STUDY REPORT:\n{prior_report}"
             if prior_image_path:
                 prior_section += (
-                    f"\n\nThe prior study image is available at: {prior_image_path}\n"
-                    f"You may call tools with this path to compare findings."
+                    f"\n\nPrior study image path: {prior_image_path}"
                 )
             text_parts.append(prior_section)
-
-        text_parts.append(
-            f"\nUse the available tools to gather information from specialized CXR models. "
-            f"When calling tools, pass image_path=\"{image_path}\" exactly as shown.\n\n"
-            f"Synthesize your findings into a final report with FINDINGS and IMPRESSION sections. "
-            f"When you have gathered sufficient information from the tools, stop calling tools "
-            f"and provide your final synthesized report directly."
-        )
 
         content.append({
             "type": "text",

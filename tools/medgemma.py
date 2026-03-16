@@ -16,10 +16,15 @@ class MedGemmaVQATool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[VQA] "
             "Ask a clinical question about a chest X-ray using MedGemma "
-            "(Google's 4B medical vision-language model). Use for follow-up "
-            "questions, verification of specific findings, or when other "
-            "tools disagree."
+            "(Google's 4B medical vision-language model). "
+            "WHEN TO USE: Use as a tiebreaker when CheXagent-2 VQA and classifiers disagree on a finding. "
+            "Provides an independent third opinion from a different model family (Google vs Stanford). "
+            "EXAMPLE: "
+            "Input: {image_path: '...', question: 'Is there consolidation in the right lower lobe?'} → "
+            "'MedGemma VQA:\nQ: Is there consolidation in the right lower lobe?\n"
+            "A: There is no definite consolidation in the right lower lobe. There is minor atelectasis at the right base.'"
         )
 
     @property
@@ -62,9 +67,15 @@ class MedGemmaReportTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[REPORT GENERATOR] "
             "Generate a radiology report using MedGemma (Google's 4B medical "
-            "vision-language model). Provides a third-opinion report alongside "
-            "CheXagent-2 and CheXOne."
+            "vision-language model). "
+            "WHEN TO USE: Call as a third-opinion report when chexagent2_report and chexone_report "
+            "disagree on key findings. NOT needed for every study — only when the first two reports conflict. "
+            "EXAMPLE OUTPUT: "
+            "'MedGemma Report:\nThe cardiac silhouette is at the upper limits of normal. "
+            "The lungs are clear bilaterally without consolidation, effusion, or pneumothorax. "
+            "No acute osseous abnormalities.'"
         )
 
     @property

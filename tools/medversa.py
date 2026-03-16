@@ -23,8 +23,15 @@ class MedVersaReportTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[REPORT GENERATOR] "
             "Generate a radiology report using MedVersa (7B generalist medical AI). "
-            "Can incorporate patient context (age, gender, indication) if provided."
+            "Can incorporate patient context (age, gender, indication) if provided. "
+            "WHEN TO USE: Call as an additional opinion when chexagent2 and chexone reports conflict. "
+            "Particularly useful when patient context is available — pass age/gender/indication for more targeted report. "
+            "EXAMPLE OUTPUT: "
+            "'MedVersa Report:\nFINDINGS: The heart is normal in size. The lungs are clear. "
+            "There is no pleural effusion or pneumothorax. The mediastinal contours are normal.\n"
+            "IMPRESSION: No acute cardiopulmonary abnormality.'"
         )
 
     @property
@@ -74,10 +81,13 @@ class MedVersaClassifyTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[CLASSIFIER] "
             "Classify a chest X-ray for pathologies using MedVersa (7B). "
-            "Returns diagnoses from 33 supported chest pathology categories. "
-            "Use this for broad classification when you want to know ALL findings, "
-            "not just check for a specific disease."
+            "Returns diagnoses from 33 supported chest pathology categories (broader than CheXpert 14). "
+            "WHEN TO USE: Call when you want to check for pathologies beyond the 14 CheXpert labels "
+            "(e.g., hernia, subcutaneous emphysema, mediastinal widening). "
+            "EXAMPLE OUTPUT: "
+            "'MedVersa Classification (33 pathologies):\n  Cardiomegaly, Pleural Effusion, Atelectasis'"
         )
 
     @property
@@ -120,8 +130,14 @@ class MedVersaDetectTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[GROUNDING] "
             "Detect and localize abnormalities in a chest X-ray using MedVersa (7B). "
-            "Returns bounding boxes around detected pathologies and structures."
+            "Returns bounding boxes around detected pathologies and structures. "
+            "WHEN TO USE: Use for open-ended abnormality detection — finds things you might not have asked about. "
+            "Different from chexagent2_grounding which requires you to specify what to look for. "
+            "EXAMPLE OUTPUT: "
+            "'MedVersa Detection:\n  Detected: cardiomegaly [0.22, 0.28, 0.78, 0.85], "
+            "pleural effusion [0.55, 0.60, 0.95, 0.95]'"
         )
 
     @property
@@ -172,9 +188,16 @@ class MedVersaSegmentTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[GROUNDING] "
             "Segment regions in a chest X-ray using MedVersa (7B) 2D segmentation. "
             "Returns pixel-level mask with coverage percentage. "
-            "Use this to verify extent and location of findings."
+            "WHEN TO USE: Use to quantify the extent of a finding (e.g., 'how much lung is affected?'). "
+            "Similar to biomedparse_segment but uses a different model — use biomedparse for verified CXR prompts, "
+            "use this for custom/unusual segmentation queries. "
+            "EXAMPLE OUTPUT: "
+            "'MedVersa 2D Segmentation:\n  Text: lung opacity segmented\n"
+            "  Coverage: 12.3% of image\n  Mask shape: [512, 512]\n"
+            "  Mask saved: cache/masks/medversa/a1b2c3d4e5f6.png'"
         )
 
     @property
@@ -239,9 +262,13 @@ class MedVersaVQATool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[VQA] "
             "Ask a medical question about a chest X-ray using MedVersa (7B). "
-            "Use for targeted follow-up questions, e.g., "
-            "'Is the cardiac silhouette enlarged?' or 'Are there bilateral effusions?'"
+            "WHEN TO USE: Use as an additional VQA opinion when chexagent2_vqa and medgemma_vqa disagree, "
+            "or when you need a third verification source. "
+            "EXAMPLE: "
+            "Input: {image_path: '...', question: 'Is the cardiac silhouette enlarged?'} → "
+            "'MedVersa VQA:\n  Q: Is the cardiac silhouette enlarged?\n  A: Yes, the cardiac silhouette appears mildly enlarged.'"
         )
 
     @property

@@ -16,9 +16,19 @@ class CheXOneReportTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[REPORT GENERATOR] "
             "Generate a radiology report using CheXOne (Qwen2.5-VL-3B), with optional "
-            "step-by-step reasoning. Good as a second opinion when other models are "
-            "ambiguous. Set reasoning=true for explicit clinical reasoning trace."
+            "step-by-step reasoning. "
+            "WHEN TO USE: Call this as a second-opinion report alongside chexagent2_report. "
+            "Compare both reports to identify agreements (high confidence) and disagreements (need verification). "
+            "Set reasoning=true only when you need to understand WHY a finding was reported. "
+            "EXAMPLE OUTPUT (reasoning=false): "
+            "'CheXOne Report (Instruct mode):\nThe lungs are clear. Heart size is normal. "
+            "No pleural effusion or pneumothorax. Mediastinal contours are unremarkable.' "
+            "EXAMPLE OUTPUT (reasoning=true): "
+            "'CheXOne Report (Reasoning mode):\nStep 1: Examining lung fields - no consolidation or masses. "
+            "Step 2: Cardiac silhouette - normal size. Step 3: Pleural spaces - clear bilaterally.\n"
+            "Final: The lungs are clear. Heart size is normal. No pleural effusion or pneumothorax.'"
         )
 
     @property

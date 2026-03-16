@@ -16,11 +16,16 @@ class CheXzeroClassifyTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
-            "Zero-shot chest X-ray classification using CheXzero (CLIP fine-tuned on MIMIC-CXR). "
-            "Classifies an image for multiple pathologies using 10-model ensemble with majority vote. "
-            "Default: classifies all 14 CheXpert pathologies in one call. "
-            "Returns binary present/absent for each pathology. "
-            "Use this for comprehensive multi-label screening — much faster than testing one disease at a time."
+            "[CLASSIFIER] "
+            "Zero-shot chest X-ray classification using CheXzero (10-model CLIP ensemble). "
+            "Classifies all 14 CheXpert pathologies in one call with majority vote. Very reliable. "
+            "WHEN TO USE: Call this early (in parallel with chexagent2_report) as a systematic screen. "
+            "The binary present/absent labels tell you what to look for in the reports and what to verify. "
+            "EXAMPLE OUTPUT: "
+            "'CheXzero 10-Model Ensemble (majority vote):\n"
+            "  PRESENT: Atelectasis, Cardiomegaly, Pleural Effusion, Support Devices\n"
+            "  ABSENT:  Consolidation, Edema, Enlarged Cardiomediastinum, Fracture, "
+            "Lung Lesion, Lung Opacity, No Finding, Pleural Other, Pneumonia, Pneumothorax'"
         )
 
     @property

@@ -1,10 +1,10 @@
 ---
 name: grounded_report
-version: "4.0"
-description: MIMIC-style CXR report generation optimized for RadCliQ-v1/RadGraph-F1/BLEU-2
+version: "4.1"
+description: CXR report generation with grounding, optimized for RadCliQ-v1/RadGraph-F1/BLEU-2
 ---
 
-# Workflow: Generate MIMIC-CXR Report
+# Workflow: Generate Grounded CXR Report
 
 Execute these phases IN ORDER. Do not skip any mandatory step.
 
@@ -37,16 +37,16 @@ For each confirmed abnormal finding:
 
 ## Phase 6: Write Final Report
 
-### CRITICAL — Match MIMIC-CXR Report Style
+### CRITICAL — Match the Ground Truth Report Style
 
-Write reports that match standard MIMIC-CXR dictation style. The Phase 1 reports provide style reference for each specific study — use them as a guide for tone and phrasing.
+Write reports that match standard radiology dictation style. The Phase 1 reports provide a style reference for this specific study — mirror their tone, phrasing, and level of detail.
 
 ### Writing Rules
 
 FINDINGS section:
 - Write plain prose. No bullets, no headers, no markdown.
 - Do NOT start with technique ("PA view of the chest", "AP radiograph") — jump straight to findings.
-- Prefer "There is..." / "There is no..." phrasing for stating/negating findings (e.g., "There is no pleural effusion.", "There is no pneumothorax."). This matches standard MIMIC-CXR dictation style.
+- Prefer "There is..." / "There is no..." phrasing for stating/negating findings (e.g., "There is no pleural effusion.", "There is no pneumothorax.").
 - Use standard radiology phrases: "is seen", "are noted", "is normal", "are unremarkable".
 - Combine negatives: "There is no focal consolidation, pleural effusion or pneumothorax."
 - Include ALL findings from tool outputs — do not omit subtle ones (atelectasis, old fractures, scarring, calcifications).

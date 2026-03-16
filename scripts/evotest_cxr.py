@@ -722,6 +722,7 @@ class CXREvoTest:
 
     def _build_tools(self):
         from tools import (
+            EvidenceBoardTool,
             CheXagent2ReportTool, CheXagent2SRRGTool, CheXagent2GroundingTool,
             CheXagent2ClassifyTool, CheXagent2VQATool, CheXOneReportTool,
             CheXzeroClassifyTool, CXRFoundationClassifyTool,
@@ -731,6 +732,10 @@ class CXREvoTest:
             FactCheXckerVerifyTool,
         )
         tool_config = self.config.get("tools", {})
+
+        # Evidence board always enabled (local, no server)
+        tools = [EvidenceBoardTool()]
+
         registry = {
             "chexagent2": CheXagent2ReportTool,
             "chexagent2_srrg": CheXagent2SRRGTool,
@@ -750,7 +755,6 @@ class CXREvoTest:
             "medsam3": MedSAM3SegmentTool,
             "factchexcker": FactCheXckerVerifyTool,
         }
-        tools = []
         for key, cls in registry.items():
             entry = tool_config.get(key, {})
             if entry.get("enabled", False):

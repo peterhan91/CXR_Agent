@@ -16,10 +16,18 @@ class FactCheXckerVerifyTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[VERIFICATION] "
             "Verify and correct measurement hallucinations in a CXR report using FactCheXcker. "
-            "Detects inaccurate quantifiable measurements (ETT position, tube placements) "
-            "and corrects them based on the actual image. Only call this when the draft report "
-            "contains specific numerical measurements about tubes, lines, or devices."
+            "Detects inaccurate quantifiable measurements (ETT position, tube placements, carina distance) "
+            "and corrects them based on the actual image. "
+            "WHEN TO USE: Call ONLY when your draft report mentions specific numerical measurements about "
+            "tubes, lines, or devices (e.g., 'ETT tip 3cm above carina'). Do NOT call for reports without measurements. "
+            "EXAMPLE (changes needed): "
+            "Input: {image_path: '...', report: 'ETT tip is 2cm above the carina...'} → "
+            "'FactCheXcker found measurement issues and corrected the report:\n"
+            "ETT tip is 4.5cm above the carina...' "
+            "EXAMPLE (no changes): "
+            "'FactCheXcker: No measurement hallucinations detected. Report is consistent with the image.'"
         )
 
     @property

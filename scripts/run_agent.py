@@ -47,6 +47,7 @@ def build_tools(config: dict) -> list:
     Enable/disable and set endpoints in configs/config.yaml.
     """
     from tools import (
+        EvidenceBoardTool,
         CheXagent2ReportTool,
         CheXagent2SRRGTool,
         CheXagent2GroundingTool,
@@ -71,7 +72,11 @@ def build_tools(config: dict) -> list:
     logger = logging.getLogger(__name__)
     tool_config = config.get("tools", {})
 
-    # Map config keys to tool classes
+    # Evidence board is always enabled (local, no server)
+    tools = [EvidenceBoardTool()]
+    logger.info("Enabled tool: evidence_board (local)")
+
+    # Map config keys to tool classes (server-backed)
     tool_registry = {
         "chexagent2": CheXagent2ReportTool,
         "chexagent2_srrg": CheXagent2SRRGTool,
@@ -94,7 +99,6 @@ def build_tools(config: dict) -> list:
         "factchexcker": FactCheXckerVerifyTool,
     }
 
-    tools = []
     for key, tool_cls in tool_registry.items():
         entry = tool_config.get(key, {})
         if entry.get("enabled", False):

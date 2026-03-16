@@ -23,12 +23,20 @@ class BiomedParseSegmentTool(BaseCXRTool):
     @property
     def description(self) -> str:
         return (
+            "[GROUNDING] "
             "Segment anatomical structures or pathological findings in a chest X-ray "
-            "using BiomedParse. Provide text prompts describing what to segment. "
+            "using BiomedParse. Returns coverage percentage, bounding box, and mask PNG. "
             "Verified CXR prompts: 'left lung', 'right lung', 'lung', 'lung opacity', "
             "'viral pneumonia', 'COVID-19 infection'. "
-            "Returns coverage percentage and bounding box for each segmented region. "
-            "Use this to verify laterality, location, and extent of findings."
+            "WHEN TO USE: Use for diffuse/bilateral findings where you need extent quantification "
+            "(e.g., 'how much of the lung is opacified?'). For focal findings, prefer chexagent2_grounding. "
+            "EXAMPLE: "
+            "Input: {image_path: '...', prompts: ['left lung', 'lung opacity']} → "
+            "'BiomedParse Segmentation Results:\n"
+            "  'left lung': 18.3% coverage, bbox=[0.50, 0.15, 0.95, 0.90]\n"
+            "    Mask saved: cache/masks/biomedparse/a1b2c3d4e5f6.png\n"
+            "  'lung opacity': 4.7% coverage, bbox=[0.55, 0.55, 0.85, 0.85]\n"
+            "    Mask saved: cache/masks/biomedparse/f6e5d4c3b2a1.png'"
         )
 
     @property
