@@ -1,6 +1,6 @@
 # CXR Agent — v5.1 Evaluation Program
 
-Three phases: (1) test tools with real CXRs and update descriptions, (2) verify evidence board works, (3) run plain-prompt agent on 5 studies per dataset and compare against baselines.
+Three phases: (1) test tools with real CXRs and update descriptions, (2) verify evidence board works, (3) run plain-prompt agent on 5 studies × 4 datasets and compare against baselines.
 
 ## Phase 1: Test all tools with real CXRs and update descriptions
 
@@ -38,7 +38,6 @@ datasets = {
     'chexpert_plus': 'data/eval/chexpert_plus_valid.json',
     'rexgradient': 'data/eval/rexgradient_test.json',
     'iu_xray': 'data/eval/iu_xray_test.json',
-    'padchest_gr': 'data/eval/padchest_gr_test.json',
 }
 for name, path in datasets.items():
     if os.path.exists(path):
@@ -69,9 +68,8 @@ Save all outputs to `results/tool_test_outputs.json`.
 
 ### Step 1.5: Test on other datasets
 
-Repeat tool calls for 1 image from each of: CheXpert-Plus, ReXGradient, IU-Xray, PadChest-GR. Focus on:
-- **PadChest-GR**: 16-bit PNG — do tools handle it? Does the agent's normalization work?
-- **ReXGradient**: different image resolution — any tool failures?
+Repeat tool calls for 1 image from each of: CheXpert-Plus, ReXGradient, IU-Xray. Focus on:
+- **ReXGradient**: 16-bit PNG — do tools handle it? Does the agent's normalization work?
 - **IU-Xray**: different report style — do report generators adapt?
 - **CheXpert-Plus**: Stanford data — any path issues?
 
@@ -124,7 +122,7 @@ If evidence_board is not called, check:
 ## Phase 3: Plain-prompt agent vs baselines on 5 studies × 5 datasets
 
 ### Goal
-Run the plain-prompt agent (no skills, no evolving) on 5 studies from each dataset. Compare against CheXOne, CheXagent-2, and MedVersa baselines. Report all 7 ReXrank metrics.
+Run the plain-prompt agent (no skills, no evolving) on 5 studies from each of 4 datasets (MIMIC-CXR, CheXpert-Plus, ReXGradient, IU-Xray). Compare against CheXOne, CheXagent-2, and MedVersa baselines. Report all 7 ReXrank metrics.
 
 ### Prepare 5-study samples
 
@@ -140,7 +138,6 @@ datasets = {
     'chexpert_plus': 'data/eval/chexpert_plus_valid.json',
     'rexgradient': 'data/eval/rexgradient_test.json',
     'iu_xray': 'data/eval/iu_xray_test.json',
-    'padchest_gr': 'data/eval/padchest_gr_test.json',
 }
 
 def has_both_sections(study):
@@ -174,7 +171,7 @@ for name, path in datasets.items():
 ```bash
 OUT=results/eval_v51
 
-for DATASET in mimic_cxr chexpert_plus rexgradient iu_xray padchest_gr; do
+for DATASET in mimic_cxr chexpert_plus rexgradient iu_xray; do
   INPUT=data/eval/sample_5/${DATASET}_5.json
   [ -f "$INPUT" ] || continue
 
@@ -197,7 +194,7 @@ done
 ```bash
 CFG=configs/config_grounded.yaml
 
-for DATASET in mimic_cxr chexpert_plus rexgradient iu_xray padchest_gr; do
+for DATASET in mimic_cxr chexpert_plus rexgradient iu_xray; do
   INPUT=data/eval/sample_5/${DATASET}_5.json
   [ -f "$INPUT" ] || continue
 
@@ -210,7 +207,7 @@ done
 ### Score all predictions
 
 ```bash
-for DATASET in mimic_cxr chexpert_plus rexgradient iu_xray padchest_gr; do
+for DATASET in mimic_cxr chexpert_plus rexgradient iu_xray; do
   [ -d "$OUT/$DATASET/" ] || continue
   python scripts/eval_mimic.py --mode score --output "$OUT/$DATASET/"
   python scripts/eval_mimic.py --mode compare --output "$OUT/$DATASET/"
@@ -232,9 +229,7 @@ results/eval_v51/
 │   └── ...
 ├── rexgradient/
 │   └── ...
-├── iu_xray/
-│   └── ...
-└── padchest_gr/
+└── iu_xray/
     └── ...
 ```
 
