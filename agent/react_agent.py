@@ -55,7 +55,6 @@ class AgentTrajectory:
     total_output_tokens: int = 0
     total_duration_ms: float = 0.0
     unused_tools: list = field(default_factory=list)
-    evidence_summary: str = ""
 
 
 class CXRReActAgent:
@@ -162,8 +161,7 @@ class CXRReActAgent:
             try:
                 # Skip cache for stateful/variable-input tools
                 # - factchexcker_verify: input changes per draft
-                # - evidence_board: local stateful memory
-                if tool_name in ("factchexcker_verify", "evidence_board"):
+                if tool_name in ("factchexcker_verify",):
                     output = tool.run(**tool_input)
                 else:
                     output = cached_tool_call(tool_name, tool.run, **tool_input)
@@ -228,12 +226,6 @@ class CXRReActAgent:
             image_id=image_id,
             concept_prior=concept_prior_text,
         )
-
-        # Reset evidence board for this study (fresh per run)
-        from tools.evidence_board import EvidenceBoardTool
-        for tool in self.tools:
-            if isinstance(tool, EvidenceBoardTool):
-                tool.board.reset()
 
         system_prompt = self._build_system_prompt(concept_prior_text)
 
@@ -392,13 +384,6 @@ class CXRReActAgent:
         trajectory.unused_tools = [t.name for t in self.tools if t.name not in used_tools]
         if trajectory.unused_tools:
             logger.info(f"Unused tools: {trajectory.unused_tools}")
-
-        # Extract evidence board final state
-        from tools.evidence_board import EvidenceBoardTool
-        for tool in self.tools:
-            if isinstance(tool, EvidenceBoardTool):
-                trajectory.evidence_summary = tool.board.list_all()
-                break
 
         return trajectory
 

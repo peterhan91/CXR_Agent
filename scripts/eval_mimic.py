@@ -677,14 +677,12 @@ def run_agent_eval(args):
             n_steps = len(trajectory.steps)
             steps = trajectory.steps
             unused_tools = trajectory.unused_tools
-            evidence_summary = trajectory.evidence_summary
         except Exception as e:
             logger.error(f"Agent failed for {study_id}: {e}", exc_info=True)
             report = ""
             in_tok = out_tok = n_steps = 0
             steps = []
             unused_tools = []
-            evidence_summary = ""
             errors += 1
 
         wall_ms = (time.time() - t0) * 1000
@@ -704,7 +702,6 @@ def run_agent_eval(args):
             "num_steps": n_steps,
             "wall_time_ms": wall_ms,
             "unused_tools": unused_tools,
-            "evidence_summary": evidence_summary,
         }
         predictions.append(pred)
         existing[study_id] = pred
@@ -719,7 +716,6 @@ def run_agent_eval(args):
             "wall_time_ms": wall_ms,
             "groundings": groundings,
             "unused_tools": unused_tools,
-            "evidence_summary": evidence_summary,
             "steps": steps,
         }
         with open(trajectories_path, "a") as f:
@@ -1417,9 +1413,7 @@ def _build_tools(config: dict) -> list:
         MedSAMSegmentTool,
         MedSAM3SegmentTool,
         FactCheXckerVerifyTool,
-        EvidenceBoardTool,
     )
-
     tool_config = config.get("tools", {})
     registry = {
         "chexagent2": CheXagent2ReportTool,
@@ -1443,9 +1437,7 @@ def _build_tools(config: dict) -> list:
         "factchexcker": FactCheXckerVerifyTool,
     }
 
-    # Evidence board is always enabled (local, no server)
-    tools = [EvidenceBoardTool()]
-    logger.info("  Tool enabled: evidence_board (local)")
+    tools = []
 
     for key, cls in registry.items():
         entry = tool_config.get(key, {})

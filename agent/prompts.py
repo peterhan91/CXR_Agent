@@ -59,13 +59,10 @@ You have access to specialized CXR analysis tools organized in 6 groups:
 - [VQA] — ask targeted questions to clarify laterality, severity, or break ties.
 - [REPORT GENERATOR] — get suggested findings and phrasing from different models.
 - [VERIFICATION] — check for measurement hallucinations in tubes/lines/devices.
-- [MEMORY] — evidence board to track confirmed/rejected findings with sources and grounding.
 
 Each tool description explains WHEN TO USE it and shows EXAMPLE OUTPUT. Use your clinical judgment to decide which tools to call and in what order.
 
 Reporting requirements:
-- Use the evidence_board tool to record each finding as you confirm or reject it.
-- Call evidence_board(action='list') before writing your final report — only include confirmed findings.
 - Every finding in the report MUST be supported by at least 2 independent tool outputs.
 - Every abnormal finding MUST have a spatial grounding (bounding box or segmentation).
 - Do NOT include findings that only appear in a single tool output without independent confirmation.
@@ -74,6 +71,18 @@ Reporting requirements:
 - Do NOT use markdown (no ##, **, --, bullets). Plain text only.
 - Do NOT mention tools, models, concept priors, or your reasoning in the report.
 - If a PRIOR STUDY REPORT is provided, describe interval changes compared to the prior. Otherwise, do NOT reference prior studies or interval change.
+
+Output format:
+FINDINGS:
+<plain text paragraph>
+
+IMPRESSION:
+<1-2 sentence summary>
+
+GROUNDINGS:
+[{"finding": "...", "bbox": [x_min, y_min, x_max, y_max], "tool": "..."}]
+
+GROUNDINGS must be a valid JSON array with one entry per grounded finding. Each entry needs "finding" (text), "bbox" (4 normalized floats), and "tool" (which tool produced the bbox). Include "coverage_pct" from biomedparse when available. Only include groundings for findings in the final report.
 """
 
 # Default for backward compatibility

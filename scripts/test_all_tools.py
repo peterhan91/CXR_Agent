@@ -59,16 +59,6 @@ print("\n=== VERIFICATION ===", flush=True)
 test_report = "FINDINGS: The ET tube tip is approximately 2 cm above the carina. The heart is normal in size. The lungs are clear.\nIMPRESSION: ET tube in satisfactory position."
 test("factchexcker_verify", lambda: requests.post("http://localhost:8007/verify_report", json={"image_path": IMG, "report": test_report}, timeout=180).json())
 
-# === EVIDENCE BOARD (local, no server) ===
-print("\n=== EVIDENCE BOARD ===", flush=True)
-sys.path.insert(0, "/home/than/DeepLearning/CXR_Agent")
-from tools.evidence_board import EvidenceBoardTool
-eb = EvidenceBoardTool()
-test("evidence_board_add", lambda: eb.run("add", "cardiomegaly", ["chexzero: present", "cxr_foundation: present"], "bbox=[0.25, 0.30, 0.75, 0.82]"))
-test("evidence_board_add2", lambda: eb.run("add", "pleural effusion", ["chexagent2_report: mentioned"]))
-test("evidence_board_reject", lambda: eb.run("reject", "pneumonia", reason="only 1 source positive, 3 negative"))
-test("evidence_board_list", lambda: eb.run("list"))
-
 # === Save all results ===
 with open("results/tool_test_outputs.json", "w") as f:
     json.dump({"image_path": IMG, "dataset": "mimic_cxr", "results": results}, f, indent=2, default=str)

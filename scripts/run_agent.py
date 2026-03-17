@@ -47,7 +47,6 @@ def build_tools(config: dict) -> list:
     Enable/disable and set endpoints in configs/config.yaml.
     """
     from tools import (
-        EvidenceBoardTool,
         CheXagent2ReportTool,
         CheXagent2SRRGTool,
         CheXagent2GroundingTool,
@@ -72,9 +71,7 @@ def build_tools(config: dict) -> list:
     logger = logging.getLogger(__name__)
     tool_config = config.get("tools", {})
 
-    # Evidence board is always enabled (local, no server)
-    tools = [EvidenceBoardTool()]
-    logger.info("Enabled tool: evidence_board (local)")
+    tools = []
 
     # Map config keys to tool classes (server-backed)
     tool_registry = {
@@ -165,7 +162,6 @@ def run_single_image(
         "duration_ms": trajectory.total_duration_ms,
         "trajectory": trajectory.steps,
         "unused_tools": trajectory.unused_tools,
-        "evidence_summary": trajectory.evidence_summary,
     }
 
 
