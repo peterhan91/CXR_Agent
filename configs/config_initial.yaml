@@ -11,6 +11,7 @@ agent:
   # No reasoning_effort in initial mode (original had none)
 
 clear:
+  enabled: false
   model_path: "../cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt"
   concepts_path: "../cxr_concept/CheXzero/concepts/mimic_concepts.csv"
   dinov2_model_name: "dinov2_vitb14"
@@ -29,9 +30,9 @@ tools:
     enabled: true
     endpoint: "http://localhost:8002"
 
-  # MedGemma — NOT in initial config
+  # MedGemma VQA — enabled as 3rd independent model for tie-breaking
   medgemma_vqa:
-    enabled: false
+    enabled: true
     endpoint: "http://localhost:8010"
   medgemma_report:
     enabled: false

@@ -148,15 +148,17 @@ def strip_groundings(report_text: str) -> tuple:
                     pass
         clean = before
 
-    # Strip preamble text before FINDINGS:
-    findings_match = re.search(r'(?:^|\n)\s*FINDINGS?:\s*', clean, re.IGNORECASE)
-    if findings_match:
-        clean = clean[findings_match.start():].strip()
-
-    # Strip any markdown formatting the agent might still use
+    # Strip markdown formatting BEFORE searching for FINDINGS header,
+    # because the agent wraps headers in **bold** or ## markdown
     clean = re.sub(r'^#+\s+', '', clean, flags=re.MULTILINE)  # ## headers
     clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', clean)  # **bold**
     clean = re.sub(r'---+', '', clean)  # horizontal rules
+
+    # Strip preamble text before FINDINGS: (with or without colon)
+    # Use the LAST occurrence — agent sometimes outputs the report twice
+    findings_matches = list(re.finditer(r'(?:^|\n)\s*FINDINGS?:?\s*[\n:]', clean, re.IGNORECASE))
+    if findings_matches:
+        clean = clean[findings_matches[-1].start():].strip()
 
     return clean.strip(), groundings
 
@@ -602,19 +604,22 @@ def run_agent_eval(args):
     existing = _load_existing_predictions(predictions_path)
     predictions = list(existing.values())
 
-    # CLEAR scorer (always enabled)
-    from clear.concept_scorer import CLEARConceptScorer
-
+    # CLEAR scorer (can be disabled via clear.enabled: false)
     clear_cfg = config.get("clear", {})
-    scorer = CLEARConceptScorer(
-        model_path=clear_cfg.get("model_path"),
-        concepts_path=clear_cfg.get("concepts_path"),
-        dinov2_model_name=clear_cfg.get("dinov2_model_name", "dinov2_vitb14"),
-        image_resolution=clear_cfg.get("image_resolution", 448),
-    )
-    logger.info("Loading CLEAR model...")
-    scorer.load()
-    logger.info("CLEAR model ready")
+    scorer = None
+    if clear_cfg.get("enabled", True):
+        from clear.concept_scorer import CLEARConceptScorer
+        scorer = CLEARConceptScorer(
+            model_path=clear_cfg.get("model_path"),
+            concepts_path=clear_cfg.get("concepts_path"),
+            dinov2_model_name=clear_cfg.get("dinov2_model_name", "dinov2_vitb14"),
+            image_resolution=clear_cfg.get("image_resolution", 448),
+        )
+        logger.info("Loading CLEAR model...")
+        scorer.load()
+        logger.info("CLEAR model ready")
+    else:
+        logger.info("CLEAR disabled by config")
 
     # Build tools
     tools = _build_tools(config, prompt_mode=prompt_mode)
@@ -945,11 +950,16 @@ def score_predictions(args):
 
             dataset = entry.get("dataset", "unknown")
 
+            # Build clean "reports" text: FINDINGS + IMPRESSION only
+            # (strips preamble like FINAL REPORT, EXAMINATION, INDICATION)
+            gt_report = format_gt_report(gt_findings, gt_impression, gt_full)
+            pred_report = format_gt_report(pred_findings, pred_impression, pred_full)
+
             records.append({
                 "study_id": sid,
                 "dataset": dataset,
-                "gt_full": gt_full.lower(),
-                "pred_full": pred_full.lower(),
+                "gt_full": gt_report.lower(),
+                "pred_full": pred_report.lower(),
                 "gt_findings": gt_findings.lower() if gt_findings else "",
                 "pred_findings": (pred_findings.lower() if pred_findings
                                   else pred_full.lower()),

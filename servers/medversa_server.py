@@ -227,7 +227,7 @@ async def health():
 @app.post("/generate_report", response_model=ReportResponse)
 async def generate_report(req: ReportRequest):
     _, output_text, gen_time = _generate(
-        req.image_path, req.context, req.prompt, req.modality, "report",
+        req.image_path, req.context, req.prompt, req.modality, "report generation",
     )
     return ReportResponse(report=output_text, generation_time_ms=gen_time)
 
@@ -236,9 +236,10 @@ async def generate_report(req: ReportRequest):
 
 @app.post("/vqa", response_model=TextResponse)
 async def vqa(req: VQARequest):
+    # MedVersa has no "vqa" task — use "report generation" with the question as prompt
     prompt = f"{req.question} <img0>"
     _, output_text, gen_time = _generate(
-        req.image_path, req.context, prompt, req.modality, "vqa",
+        req.image_path, req.context, prompt, req.modality, "report generation",
     )
     return TextResponse(result=output_text, generation_time_ms=gen_time)
 

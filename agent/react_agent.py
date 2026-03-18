@@ -505,9 +505,10 @@ class CXRReActAgent:
                 content.append(img_block)
 
         if self.prompt_mode == "initial":
-            # Original user message — no prior_report/clinical_context support
-            # Note: original code didn't include image_path in text, but tools
-            # need it to function. We append it so the A/B test is functional.
+            # Don't send the CXR image to Sonnet — it's not a CXR reader and
+            # will hallucinate findings from visual interpretation. Only the
+            # specialized tools should see the image.
+            content = []  # discard any image block added above
             content.append({
                 "type": "text",
                 "text": f"{INITIAL_USER_MESSAGE}\n\nThe image file path for tool calls is: {image_path}",
