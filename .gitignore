@@ -1,5 +1,7 @@
 # Python
 __pycache__/
+eval_20260317/
+paper/
 *.py[cod]
 *.egg-info/
 dist/

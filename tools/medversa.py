@@ -13,8 +13,9 @@ _MASK_DIR.mkdir(parents=True, exist_ok=True)
 
 class MedVersaReportTool(BaseCXRTool):
 
-    def __init__(self, endpoint: str = "http://localhost:8004"):
+    def __init__(self, endpoint: str = "http://localhost:8004", legacy_mode: bool = False):
         self.endpoint = endpoint
+        self.legacy_mode = legacy_mode
 
     @property
     def name(self) -> str:
@@ -55,16 +56,21 @@ class MedVersaReportTool(BaseCXRTool):
         }
 
     def run(self, image_path: str, context: str = "") -> str:
-        if not context:
-            context = "Indication: Chest X-ray.\nComparison: None."
-        resp = requests.post(
-            f"{self.endpoint}/generate_report",
-            json={
+        if self.legacy_mode:
+            # Original payload: only image_path and context, no prompt/modality
+            payload = {"image_path": image_path, "context": context}
+        else:
+            if not context:
+                context = "Indication: Chest X-ray.\nComparison: None."
+            payload = {
                 "image_path": image_path,
                 "context": context,
                 "prompt": "Write a radiology report for <img0> with FINDINGS and IMPRESSION sections.",
                 "modality": "cxr",
-            },
+            }
+        resp = requests.post(
+            f"{self.endpoint}/generate_report",
+            json=payload,
             timeout=180,
         )
         resp.raise_for_status()

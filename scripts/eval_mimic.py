@@ -585,7 +585,16 @@ def run_agent_eval(args):
     with open(args.config) as f:
         config = yaml.safe_load(f)
 
-    suffix = "agent_noskill" if args.no_skills else "agent"
+    acfg = config.get("agent", {})
+    prompt_mode = acfg.get("prompt_mode", "current")
+
+    # Derive output suffix based on prompt_mode and skills
+    if prompt_mode == "initial":
+        suffix = "agent_initial"
+    elif args.no_skills:
+        suffix = "agent_noskill"
+    else:
+        suffix = "agent"
     predictions_path = output_dir / f"predictions_{suffix}.json"
     trajectories_path = output_dir / f"trajectories_{suffix}.jsonl"
 
@@ -608,10 +617,9 @@ def run_agent_eval(args):
     logger.info("CLEAR model ready")
 
     # Build tools
-    tools = _build_tools(config)
+    tools = _build_tools(config, prompt_mode=prompt_mode)
 
     # Initialize agent
-    acfg = config.get("agent", {})
     use_skills = not args.no_skills and config.get("skill", {}).get("enabled", True)
     agent = CXRReActAgent(
         model=acfg.get("model", "claude-sonnet-4-6"),
@@ -621,6 +629,7 @@ def run_agent_eval(args):
         tools=tools,
         reasoning_effort=acfg.get("reasoning_effort"),
         use_skills=use_skills,
+        prompt_mode=prompt_mode,
     )
 
     total = len(test_set)
@@ -641,7 +650,14 @@ def run_agent_eval(args):
         concept_prior = ""
         if scorer:
             top_k = config.get("clear", {}).get("top_k", 20)
-            concept_prior = scorer.score_image(entry["image_path"], top_k=top_k)
+            # Use original template wording in initial mode
+            prior_template = None
+            if prompt_mode == "initial":
+                from agent.initial_mode import CONCEPT_PRIOR_TEMPLATE_INITIAL
+                prior_template = CONCEPT_PRIOR_TEMPLATE_INITIAL
+            concept_prior = scorer.score_image(
+                entry["image_path"], top_k=top_k, template=prior_template,
+            )
 
         # Build optional prior context
         prior_report = ""
@@ -1391,7 +1407,7 @@ def _print_summary(mode_name: str, predictions: list, errors: int, path: Path):
         print(f"  Errors: {errors}")
 
 
-def _build_tools(config: dict) -> list:
+def _build_tools(config: dict, prompt_mode: str = "current") -> list:
     """Build tool instances from config (mirrors run_agent.py:build_tools)."""
     from tools import (
         CheXagent2ReportTool,
@@ -1415,6 +1431,7 @@ def _build_tools(config: dict) -> list:
         FactCheXckerVerifyTool,
     )
     tool_config = config.get("tools", {})
+    legacy_mode = prompt_mode == "initial"
     registry = {
         "chexagent2": CheXagent2ReportTool,
         "chexagent2_srrg": CheXagent2SRRGTool,
@@ -1443,7 +1460,10 @@ def _build_tools(config: dict) -> list:
         entry = tool_config.get(key, {})
         if entry.get("enabled", False):
             endpoint = entry.get("endpoint", "http://localhost:8000")
-            tools.append(cls(endpoint=endpoint))
+            if key == "medversa" and legacy_mode:
+                tools.append(cls(endpoint=endpoint, legacy_mode=True))
+            else:
+                tools.append(cls(endpoint=endpoint))
             logger.info(f"  Tool enabled: {key} -> {endpoint}")
 
     logger.info(f"Built {len(tools)} tools")

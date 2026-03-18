@@ -31,6 +31,12 @@ from agent.prompts import (
     SKILL_INJECTION_TEMPLATE,
     build_skills_prompt,
 )
+from agent.initial_mode import (
+    SYSTEM_PROMPT_INITIAL,
+    CONCEPT_PRIOR_TEMPLATE_INITIAL,
+    INITIAL_USER_MESSAGE,
+    INITIAL_TOOL_DESCRIPTIONS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +97,7 @@ class CXRReActAgent:
         api_key: Optional[str] = None,
         reasoning_effort: Optional[str] = None,
         use_skills: bool = True,
+        prompt_mode: str = "current",
     ):
         self.client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
         self.model = model
@@ -103,9 +110,18 @@ class CXRReActAgent:
         # Same pattern as mimic_skills models.py.
         self.reasoning_effort = reasoning_effort
         self.use_skills = use_skills
+        self.prompt_mode = prompt_mode
 
         # Build tool schemas for Anthropic API
         self._tool_schemas = [t.to_anthropic_schema() for t in self.tools]
+
+        # In initial mode, override tool descriptions to match original commit
+        if self.prompt_mode == "initial":
+            for schema in self._tool_schemas:
+                original_desc = INITIAL_TOOL_DESCRIPTIONS.get(schema["name"])
+                if original_desc:
+                    schema["description"] = original_desc
+
         # Map tool names to instances for execution
         self._tool_map = {t.name: t for t in self.tools}
 
@@ -117,8 +133,16 @@ class CXRReActAgent:
         2. Skill files (workflow, tool guidance, interpretation rules) — only if use_skills=True
         3. CLEAR concept prior for this specific image
         4. Optional evolved skill text (for evotest integration)
+
+        In initial mode: uses original system prompt, skips skills entirely.
         """
-        # Pick the right base prompt
+        if self.prompt_mode == "initial":
+            parts = [SYSTEM_PROMPT_INITIAL]
+            if concept_prior_text:
+                parts.append(concept_prior_text)
+            return "\n\n".join(parts)
+
+        # Current mode
         has_skills = self.use_skills or self.skill_text
         base_prompt = SYSTEM_PROMPT_WITH_SKILLS if has_skills else SYSTEM_PROMPT_PLAIN
         parts = [base_prompt]
@@ -469,6 +493,8 @@ class CXRReActAgent:
 
         Analogous to mimic_skills' "Patient History: {input}" in the prompt,
         but includes the actual image for multimodal models.
+
+        In initial mode: uses original verbose instruction, skips prior/clinical context.
         """
         content = []
 
@@ -478,7 +504,17 @@ class CXRReActAgent:
             if img_block:
                 content.append(img_block)
 
-        # Build the task instruction text
+        if self.prompt_mode == "initial":
+            # Original user message — no prior_report/clinical_context support
+            # Note: original code didn't include image_path in text, but tools
+            # need it to function. We append it so the A/B test is functional.
+            content.append({
+                "type": "text",
+                "text": f"{INITIAL_USER_MESSAGE}\n\nThe image file path for tool calls is: {image_path}",
+            })
+            return content
+
+        # Current mode: terse instruction + optional context
         text_parts = [
             f"Generate a radiology report for this chest X-ray. "
             f"The image file path for tool calls is: {image_path}",

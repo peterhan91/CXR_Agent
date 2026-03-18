@@ -40,11 +40,15 @@ def setup_logging(level: str = "INFO"):
     )
 
 
-def build_tools(config: dict) -> list:
+def build_tools(config: dict, prompt_mode: str = "current") -> list:
     """Build tool instances based on config.
 
     Each tool is a thin HTTP client to a FastAPI model server.
     Enable/disable and set endpoints in configs/config.yaml.
+
+    Args:
+        config: Full config dict
+        prompt_mode: "initial" for legacy A/B test mode, "current" for default
     """
     from tools import (
         CheXagent2ReportTool,
@@ -70,6 +74,7 @@ def build_tools(config: dict) -> list:
 
     logger = logging.getLogger(__name__)
     tool_config = config.get("tools", {})
+    legacy_mode = prompt_mode == "initial"
 
     tools = []
 
@@ -100,7 +105,11 @@ def build_tools(config: dict) -> list:
         entry = tool_config.get(key, {})
         if entry.get("enabled", False):
             endpoint = entry.get("endpoint", "http://localhost:8000")
-            tools.append(tool_cls(endpoint=endpoint))
+            # MedVersaReportTool gets legacy_mode flag in initial mode
+            if key == "medversa" and legacy_mode:
+                tools.append(tool_cls(endpoint=endpoint, legacy_mode=True))
+            else:
+                tools.append(tool_cls(endpoint=endpoint))
             logger.info(f"Enabled tool: {key} -> {endpoint}")
         else:
             logger.debug(f"Skipped tool: {key} (disabled)")
@@ -131,7 +140,15 @@ def run_single_image(
     if scorer is not None:
         logger.info(f"Computing CLEAR concept scores for {image_id}...")
         top_k = config.get("clear", {}).get("top_k", 20)
-        concept_prior_text = scorer.score_image(image_path, top_k=top_k)
+        # Use original template wording in initial mode
+        prior_template = None
+        prompt_mode = config.get("agent", {}).get("prompt_mode", "current")
+        if prompt_mode == "initial":
+            from agent.initial_mode import CONCEPT_PRIOR_TEMPLATE_INITIAL
+            prior_template = CONCEPT_PRIOR_TEMPLATE_INITIAL
+        concept_prior_text = scorer.score_image(
+            image_path, top_k=top_k, template=prior_template,
+        )
         logger.info(f"Concept prior computed ({top_k} top concepts)")
 
     # Run the agent
@@ -202,8 +219,12 @@ def main():
     scorer.load()
     logger.info("CLEAR model ready")
 
+    # Read prompt_mode from config
+    agent_config = config.get("agent", {})
+    prompt_mode = agent_config.get("prompt_mode", "current")
+
     # Build tools
-    tools = build_tools(config)
+    tools = build_tools(config, prompt_mode=prompt_mode)
 
     # Load skill if provided
     skill_text = None
@@ -219,7 +240,6 @@ def main():
         logger.info(f"Loaded skill from {skill_path} ({len(skill_text)} chars)")
 
     # Initialize agent
-    agent_config = config.get("agent", {})
     # Skills can be disabled via --no_skills flag or config
     use_skills = not args.no_skills and config.get("skill", {}).get("enabled", True)
 
@@ -232,6 +252,7 @@ def main():
         skill_text=skill_text,
         reasoning_effort=agent_config.get("reasoning_effort"),
         use_skills=use_skills,
+        prompt_mode=prompt_mode,
     )
 
     # Create output directory

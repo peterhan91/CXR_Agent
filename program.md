@@ -1,24 +1,46 @@
-# CXR Agent — v6 Evaluation Program
+# CXR Agent — A/B Test: Initial Agent vs Baselines
 
-30 studies × 4 datasets = 120 cases. Agent (no-skill) vs 4 baselines (CheXOne, CheXagent-2, MedVersa, MedGemma). All 7 ReXrank metrics. Results saved to `results/eval_YYYYMMDD/`.
+4 studies × 4 datasets = 16 cases. Agent (initial mode) vs 2 baselines (CheXOne, MedVersa). Reports only (FINDINGS + IMPRESSION). All 7 ReXrank metrics. Results saved to `results/eval_ab/`.
 
-## Step 1: Sample 30 studies per dataset
+## Tool Inventory
+
+19 tools across 8 servers + 1 in-process scorer. The initial agent uses 8 of these (CheXagent-2 suite + CheXOne + BiomedParse + FactCheXcker).
+
+| Category | Tool | Server (port) | What it does |
+|----------|------|---------------|--------------|
+| **Report** | `chexagent2_report` | CheXagent-2 (8001) | Free-text FINDINGS/IMPRESSION via 3B VLM |
+| **Report** | `chexagent2_srrg_report` | CheXagent-2 (8001) | Structured report by anatomical region |
+| **Report** | `chexone_report` | CheXOne (8002) | Qwen2.5-VL-3B with optional reasoning trace |
+| **Report** | `medversa_report` | MedVersa (8004) | LLaMA-2-7B with patient context support |
+| **Report** | `medgemma_report` | MedGemma (8010) | Google 4B, markdown-formatted |
+| **Classify** | `chexagent2_classify` | CheXagent-2 (8001) | View/binary/multi-disease classification |
+| **Classify** | `medversa_classify` | MedVersa (8004) | 33 pathology categories (unreliable) |
+| **Classify** | `chexzero_classify` | CheXzero (8009) | 14 CheXpert labels, 10-model ensemble, AUC 0.897 |
+| **Classify** | `cxr_foundation_classify` | CXR Foundation (8008) | Google ELIXR v2, conservative, CPU-only |
+| **VQA** | `chexagent2_vqa` | CheXagent-2 (8001) | Short-answer targeted questions |
+| **VQA** | `medgemma_vqa` | MedGemma (8010) | Verbose paragraph answers |
+| **VQA** | `medversa_vqa` | MedVersa (8004) | Unreliable — often truncated |
+| **Grounding** | `chexagent2_grounding` | CheXagent-2 (8001) | Bounding boxes for findings/devices |
+| **Grounding** | `medversa_detect` | MedVersa (8004) | Abnormality detection (often broken) |
+| **Segment** | `biomedparse_segment` | BiomedParse (8005) | Text-prompted, verified CXR prompts |
+| **Segment** | `medversa_segment` | MedVersa (8004) | 2D segmentation, Dice 0.955 on organs |
+| **Segment** | `medsam_segment` | MedSAM (8009) | Requires bbox input (cascade from grounding) |
+| **Segment** | `medsam3_segment` | MedSAM3 (8006) | Text-guided, broad vocabulary |
+| **Verify** | `factchexcker_verify` | FactCheXcker (8007) | ETT measurement correction |
+
+**CLEAR concept prior** (DINOv2+CLIP, 368K concepts) runs in-process, no server.
+
+## Step 1: Sample 4 studies per dataset
 
 Filter: GT must have **both** FINDINGS and IMPRESSION sections (non-empty).
 
-Available pool:
-- MIMIC-CXR: 1,120 eligible / 1,687 total
-- CheXpert-Plus: 62 eligible / 62 total
-- ReXGradient: 5,573 eligible / 5,573 total
-- IU-Xray: 590 eligible / 590 total
-
 ```bash
 TODAY=$(date +%Y%m%d)
-OUT=results/eval_${TODAY}
-SAMPLE=data/eval/sample_30
+OUT=results/eval_ab
+SAMPLE=data/eval/sample_4
 
 python3 -c "
-import json, os, random, re
+import json, os, random
 random.seed(42)
 
 datasets = {
@@ -33,32 +55,33 @@ def has_both_sections(study):
     i = study.get('impression', '').strip()
     return bool(f) and bool(i)
 
-os.makedirs('data/eval/sample_30', exist_ok=True)
+os.makedirs('$SAMPLE', exist_ok=True)
 all_samples = []
 for name, path in datasets.items():
     d = json.load(open(path))
     studies = d if isinstance(d, list) else d.get('baseline', d.get('studies', []))
     eligible = [s for s in studies if has_both_sections(s)]
     print(f'{name}: {len(eligible)}/{len(studies)} eligible')
-    sample = random.sample(eligible, min(30, len(eligible)))
-    with open(f'data/eval/sample_30/{name}_30.json', 'w') as f:
+    sample = random.sample(eligible, min(4, len(eligible)))
+    with open(f'$SAMPLE/{name}_4.json', 'w') as f:
         json.dump(sample, f, indent=2)
     all_samples.extend(sample)
     print(f'  -> {len(sample)} sampled')
 
-# Also save combined test_set.json (needed by --mode score)
-with open('data/eval/sample_30/all_120.json', 'w') as f:
+with open('$SAMPLE/all_16.json', 'w') as f:
     json.dump(all_samples, f, indent=2)
-print(f'Total: {len(all_samples)} studies in data/eval/sample_30/all_120.json')
+print(f'Total: {len(all_samples)} studies in $SAMPLE/all_16.json')
 "
 ```
 
 ## Step 2: Verify servers + API
 
+Only CheXagent-2 (8001), CheXOne (8002), BiomedParse (8005), FactCheXcker (8007) needed for initial agent. MedVersa (8004) needed for baseline.
+
 ```bash
-# All 8 servers must be healthy
+# Required servers for this eval
 FAIL=0
-for port in 8001 8002 8004 8005 8007 8008 8009 8010; do
+for port in 8001 8002 8004 8005 8007; do
   STATUS=$(curl -sf -o /dev/null -w "%{http_code}" http://localhost:$port/health)
   if [ "$STATUS" = "200" ]; then echo "Port $port: OK"
   else echo "Port $port: FAIL (HTTP $STATUS)"; FAIL=1; fi
@@ -83,50 +106,41 @@ cd /home/than/DeepLearning/GREEN && \
   cd /home/than/DeepLearning/CXR_Agent
 ```
 
-## Step 3: Run 4 baselines (direct model calls, no agent)
+## Step 3: Run 2 baselines (direct model calls, no agent)
 
-Each baseline calls the server endpoint directly. All use the combined `all_120.json` input and write to a single output directory so scoring sees all 4 datasets together.
+Each baseline calls its server endpoint directly. No CLEAR, no agent orchestration.
 
 ```bash
-TODAY=$(date +%Y%m%d)
-OUT=results/eval_${TODAY}
-INPUT=data/eval/sample_30/all_120.json
+OUT=results/eval_ab
+INPUT=data/eval/sample_4/all_16.json
 
-# CheXOne
+# CheXOne baseline
 conda run -n cxr_agent python scripts/eval_mimic.py --mode chexone \
   --input "$INPUT" --output "$OUT/"
 
-# CheXagent-2
-conda run -n cxr_agent python scripts/eval_mimic.py --mode chexagent2 \
-  --input "$INPUT" --output "$OUT/"
-
-# MedVersa
+# MedVersa baseline
 conda run -n cxr_agent python scripts/eval_mimic.py --mode medversa \
-  --input "$INPUT" --output "$OUT/"
-
-# MedGemma
-conda run -n cxr_agent python scripts/eval_mimic.py --mode medgemma \
   --input "$INPUT" --output "$OUT/"
 ```
 
-## Step 4: Run agent (no-skill, plain prompt)
+## Step 4: Run agent (initial mode)
+
+Uses `config_initial.yaml`: original system prompt, original tool descriptions, 8 tools, max 10 iterations, top-20 CLEAR concepts, no skills.
 
 ```bash
 conda run -n cxr_agent python scripts/eval_mimic.py --mode agent \
   --input "$INPUT" --output "$OUT/" \
-  --config configs/config_grounded.yaml --no_skills
+  --config configs/config_initial.yaml
 ```
 
 Expected output files:
 ```
-results/eval_YYYYMMDD/
-├── test_set.json                       # 120 studies (copied from input)
-├── predictions_chexone.json            # 120 CheXOne reports
-├── predictions_chexagent2.json         # 120 CheXagent-2 reports
-├── predictions_medversa.json           # 120 MedVersa reports
-├── predictions_medgemma.json           # 120 MedGemma reports
-├── predictions_agent_noskill.json      # 120 agent reports + groundings
-└── trajectories_agent_noskill.jsonl    # Full agent trajectories
+results/eval_ab/
+├── test_set.json                       # 16 studies (copied from input)
+├── predictions_chexone.json            # 16 CheXOne reports
+├── predictions_medversa.json           # 16 MedVersa reports
+├── predictions_agent_initial.json      # 16 initial-agent reports
+└── trajectories_agent_initial.jsonl    # Full agent trajectories
 ```
 
 ## Step 5: Export CSVs for scoring
@@ -135,7 +149,7 @@ results/eval_YYYYMMDD/
 conda run -n cxr_agent python scripts/eval_mimic.py --mode score --output "$OUT/"
 ```
 
-This creates `scores/{model}/{section}/gt*.csv + pred*.csv` for all 5 methods × 2 sections (findings, reports) × per-dataset + overall.
+Creates `scores/{model}/{section}/gt*.csv + pred*.csv` for all 3 methods × 2 sections (findings, reports) × per-dataset + overall. We only care about `reports/` (FINDINGS + IMPRESSION) for this test.
 
 ## Step 6: Run ReXrank scoring (7 metrics)
 
@@ -143,7 +157,7 @@ This creates `scores/{model}/{section}/gt*.csv + pred*.csv` for all 5 methods ×
 bash scripts/score_rexrank.sh "$OUT/"
 ```
 
-This computes for every CSV pair:
+Computes for every CSV pair:
 1. **CXR-Report-Metric** (radgraph env): BLEU-2, BERTScore, SembScore, RadGraph F1, RadCliQ-v1
 2. **RaTEScore** (green_score env): CXR-specific entity matching
 3. **GREEN** (green_score env): StanfordAIMI/GREEN-radllama2-7b
@@ -165,14 +179,27 @@ conda run -n cxr_agent python scripts/eval_mimic.py --mode compare --output "$OU
 ```bash
 python3 -c "
 import json
-preds = json.load(open('$OUT/predictions_agent_noskill.json'))
+
+# Read trajectories (has full step details)
+trajs = {}
+with open('results/eval_ab/trajectories_agent_initial.jsonl') as f:
+    for line in f:
+        t = json.loads(line)
+        trajs[t['study_id']] = t
+
+# Read predictions (has timing + token counts)
+preds = json.load(open('results/eval_ab/predictions_agent_initial.json'))
 for p in preds:
-    steps = [s for s in p.get('steps', []) if s.get('type') == 'tool_call']
-    ds = p['study_id'].split('_')[0]
-    print(f'{ds}/{p[\"study_id\"]}: {len(steps)} tools, '
+    sid = p['study_id']
+    t = trajs.get(sid, {})
+    tool_calls = [s for s in t.get('steps', []) if s.get('type') == 'tool_call']
+    ds = sid.split('_')[0]
+    print(f'{ds}/{sid}: {len(tool_calls)} tools, '
           f'{p.get(\"input_tokens\",0)} in, {p.get(\"wall_time_ms\",0)/1000:.1f}s')
+
 print(f'Total: {len(preds)} studies')
-avg_steps = sum(len([s for s in p.get('steps',[]) if s.get('type')=='tool_call']) for p in preds) / len(preds)
+all_tools = [len([s for s in trajs.get(p['study_id'],{}).get('steps',[]) if s.get('type')=='tool_call']) for p in preds]
+avg_steps = sum(all_tools) / len(preds)
 avg_time = sum(p.get('wall_time_ms',0) for p in preds) / len(preds) / 1000
 print(f'Avg: {avg_steps:.1f} tool calls, {avg_time:.1f}s per study')
 "
@@ -181,43 +208,33 @@ print(f'Avg: {avg_steps:.1f} tool calls, {avg_time:.1f}s per study')
 ## Expected results structure
 
 ```
-results/eval_YYYYMMDD/
+results/eval_ab/
 ├── test_set.json
 ├── predictions_chexone.json
-├── predictions_chexagent2.json
 ├── predictions_medversa.json
-├── predictions_medgemma.json
-├── predictions_agent_noskill.json
-├── trajectories_agent_noskill.jsonl
+├── predictions_agent_initial.json
+├── trajectories_agent_initial.jsonl
 └── scores/
     ├── summary.json                    # All metrics aggregated
     ├── summary.txt                     # Human-readable table
-    ├── agent_noskill/
-    │   ├── findings/
-    │   │   ├── gt.csv / pred.csv                     (120 studies)
-    │   │   ├── gt_mimic_cxr.csv / pred_mimic_cxr.csv (30 studies)
-    │   │   ├── gt_chexpert_plus.csv / pred_chexpert_plus.csv
-    │   │   ├── gt_rexgradient.csv / pred_rexgradient.csv
-    │   │   ├── gt_iu_xray.csv / pred_iu_xray.csv
-    │   │   ├── scores_overall.json     (7 metrics)
-    │   │   ├── scores_mimic_cxr.json
-    │   │   ├── scores_chexpert_plus.json
-    │   │   ├── scores_rexgradient.json
-    │   │   └── scores_iu_xray.json
+    ├── agent_initial/
+    │   └── reports/
+    │       ├── gt.csv / pred.csv                     (16 studies)
+    │       ├── gt_mimic_cxr.csv / pred_mimic_cxr.csv (4 studies)
+    │       ├── gt_chexpert_plus.csv / pred_chexpert_plus.csv
+    │       ├── gt_rexgradient.csv / pred_rexgradient.csv
+    │       ├── gt_iu_xray.csv / pred_iu_xray.csv
+    │       ├── scores_overall.json     (7 metrics)
+    │       ├── scores_mimic_cxr.json
+    │       ├── scores_chexpert_plus.json
+    │       ├── scores_rexgradient.json
+    │       └── scores_iu_xray.json
+    ├── chexone/
     │   └── reports/
     │       └── ... (same structure)
-    ├── chexone/
-    │   ├── findings/
-    │   └── reports/
-    ├── chexagent2/
-    │   ├── findings/
-    │   └── reports/
-    ├── medversa/
-    │   ├── findings/
-    │   └── reports/
-    └── medgemma/
-        ├── findings/
+    └── medversa/
         └── reports/
+            └── ... (same structure)
 ```
 
 ---
@@ -250,16 +267,28 @@ results/eval_YYYYMMDD/
 # GPU 0: CheXagent-2
 conda run -n cxr_chexagent2 python servers/chexagent2_server.py --port 8001
 
-# GPU 1: CheXOne + BiomedParse + CheXzero + MedVersa
+# GPU 1: CheXOne + BiomedParse + MedVersa
 CUDA_VISIBLE_DEVICES=1 python servers/chexone_server.py --port 8002
 CUDA_VISIBLE_DEVICES=1 python servers/biomedparse_server.py --port 8005
-CUDA_VISIBLE_DEVICES=1 python servers/chexzero_server.py --port 8009
 CUDA_VISIBLE_DEVICES=1 python servers/medversa_server.py --port 8004
 
-# GPU 2: MedGemma + FactCheXcker
-CUDA_VISIBLE_DEVICES=2 python servers/medgemma_server.py --port 8010
+# GPU 2: FactCheXcker
 OPENAI_API_KEY="..." WANDB_MODE=disabled CUDA_VISIBLE_DEVICES=2 python servers/factchexcker_server.py --port 8007 --factchexcker_dir ../FactCheXcker
-
-# CPU: CXR Foundation
-python servers/cxr_foundation_server.py --port 8008
 ```
+
+## A/B test dimensions
+
+What differs between initial mode (`config_initial.yaml`) and current mode (`config_grounded.yaml`):
+
+| Dimension | Initial mode | Current mode |
+|-----------|-------------|--------------|
+| System prompt | 8-line original (role + hard constraints) | Grounded report prompt + skill workflow |
+| Tool descriptions | Original 2-3 lines each | Verbose with WHEN TO USE, EXAMPLE OUTPUT, warnings |
+| Tool count | 8 (no MedVersa/MedGemma/CheXzero/CXR-Foundation/MedSAM) | 16+ |
+| User message | Verbose "Please analyze..." | Terse "Generate a radiology report..." + image_path |
+| CLEAR top_k | 20 concepts | 10 concepts |
+| Concept prior wording | "from {N} MIMIC-CXR concepts" | "for this image ({N} shown" |
+| Max iterations | 10 | 15 |
+| Skills | Disabled | Enabled (grounded_report.md) |
+| Reasoning effort | None | "medium" (adaptive thinking) |
+| MedVersa payload | `{image_path, context}` only | `+ prompt, modality` fields |

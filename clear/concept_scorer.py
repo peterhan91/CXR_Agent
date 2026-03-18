@@ -95,7 +95,7 @@ class CLEARConceptScorer:
 
         # Caches: image embeddings (in-memory) + concept priors (disk-persistent)
         self._embedding_cache = {}   # image_path -> np.ndarray [768]
-        self._prior_cache = {}       # (image_path, top_k) -> formatted text
+        self._prior_cache = {}       # (image_path, top_k, template) -> formatted text
         self._cache_dir = Path("cache/clear")
 
         # Image transform (matches cxr_concept training pipeline)
@@ -300,7 +300,7 @@ class CLEARConceptScorer:
 
         return embedding
 
-    def score_image(self, image_path: str, top_k: int = 20) -> str:
+    def score_image(self, image_path: str, top_k: int = 20, template: str = None) -> str:
         """Score a single CXR image against all concepts.
 
         Returns a formatted text string suitable for injection into the
@@ -309,6 +309,8 @@ class CLEARConceptScorer:
         Args:
             image_path: Path to the CXR image
             top_k: Number of top concepts to include
+            template: Optional format template override (must have {num_concepts}
+                and {concept_scores} placeholders). Used by initial mode A/B test.
 
         Returns:
             Formatted concept prior text for the agent
@@ -316,8 +318,8 @@ class CLEARConceptScorer:
         if self.model is None:
             raise RuntimeError("Model not loaded. Call .load() first.")
 
-        # Check prior text cache (exact match on image + top_k)
-        cache_key = (image_path, top_k)
+        # Check prior text cache (exact match on image + top_k + template)
+        cache_key = (image_path, top_k, template)
         if cache_key in self._prior_cache:
             logger.debug(f"CLEAR prior cache hit: {image_path} top_k={top_k}")
             return self._prior_cache[cache_key]
@@ -328,7 +330,7 @@ class CLEARConceptScorer:
         with torch.no_grad():
             scores = (embedding_tensor @ self.concept_features.T).squeeze(0).cpu().numpy()
 
-        result = self._format_concept_prior(scores, top_k)
+        result = self._format_concept_prior(scores, top_k, template=template)
         self._prior_cache[cache_key] = result
         return result
 
@@ -408,7 +410,7 @@ class CLEARConceptScorer:
         dataset.close()
         return np.concatenate(all_scores, axis=0)
 
-    def _format_concept_prior(self, scores: np.ndarray, top_k: int) -> str:
+    def _format_concept_prior(self, scores: np.ndarray, top_k: int, template: str = None) -> str:
         """Format concept scores into text for the agent's system prompt."""
         top_indices = np.argsort(scores)[::-1][:top_k]
 
@@ -418,8 +420,10 @@ class CLEARConceptScorer:
             score = scores[idx]
             lines.append(f"  {rank:2d}. {concept_text} (score: {score:.3f})")
 
-        from agent.prompts import CONCEPT_PRIOR_TEMPLATE
-        return CONCEPT_PRIOR_TEMPLATE.format(
+        if template is None:
+            from agent.prompts import CONCEPT_PRIOR_TEMPLATE
+            template = CONCEPT_PRIOR_TEMPLATE
+        return template.format(
             num_concepts=len(self.concepts),
             concept_scores="\n".join(lines),
         )
