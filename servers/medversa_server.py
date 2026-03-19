@@ -229,6 +229,13 @@ async def generate_report(req: ReportRequest):
     _, output_text, gen_time = _generate(
         req.image_path, req.context, req.prompt, req.modality, "report generation",
     )
+    # MedVersa sometimes outputs segmentation tokens instead of text for
+    # certain images. Strip the tokens and mark as failed if no real text.
+    if "<2DSEG>" in output_text or "<3DSEG>" in output_text:
+        logger.warning(f"MedVersa returned segmentation tokens for {req.image_path}")
+        cleaned = output_text.replace("<2DSEG>", "").replace("<3DSEG>", "").strip(" .")
+        if not cleaned or len(cleaned) < 10:
+            output_text = "(MedVersa unable to generate text report for this image)"
     return ReportResponse(report=output_text, generation_time_ms=gen_time)
 
 

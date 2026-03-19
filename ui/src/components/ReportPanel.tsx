@@ -77,10 +77,13 @@ function parseReport(report: string) {
   const impressionMatch = report.match(/^IMPRESSION:\s*([\s\S]*?)$/im);
 
   if (findingsMatch) {
-    return {
-      findings: findingsMatch[1]?.trim() || "",
-      impression: impressionMatch?.[1]?.trim() || "",
-    };
+    let findings = findingsMatch[1]?.trim() || "";
+    let impression = impressionMatch?.[1]?.trim() || "";
+    // Strip CheXagent-2 [Category] tags and **bold** if present
+    if (findings.includes("[") && findings.includes("]")) {
+      findings = findings.replace(/\[.*?\]\s*/g, "").replace(/\*\*([^*]*)\*\*/g, "$1").trim();
+    }
+    return { findings, impression };
   }
 
   // 2. MedGemma / markdown VLM format
