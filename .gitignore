@@ -53,3 +53,9 @@ tmp/
 # Data and reference papers
 data/
 papers/
+
+# UI build artifacts
+ui/.next/
+ui/node_modules/
+ui/.gitignore_next
+next-env.d.ts
