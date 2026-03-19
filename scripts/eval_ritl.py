@@ -89,7 +89,7 @@ Bad examples (TOO LONG):
 
 Rules:
 - 15-25 words MAX. No hedging, no explanations, no politeness.
-- Never reveal what IS on the image. Only doubt or redirect.
+- You may dispute severity or question a finding. Do NOT name new findings the resident missed.
 - Never say "reference", "ground truth", or "the reference suggests."
 - Speak as if YOU looked at the film, not as if you read a report.
 - Plain text only. No markdown, no bullets."""
@@ -181,11 +181,10 @@ You are an expert radiologist revising a chest X-ray report based on attending f
 You will receive:
 1. TOOL EVIDENCE: outputs from CXR analysis tools (reports, VQA, classifications)
 2. DRAFT REPORT: the original AI-generated report
-3. ATTENDING FEEDBACK: directional guidance from the attending radiologist
+3. ATTENDING FEEDBACK: corrections or guidance from the attending radiologist
 
-Your task: use the attending's feedback together with the existing tool evidence \
-to identify what needs to change in the draft. The feedback contains hints and \
-questions, not answers — you must reason about what corrections are needed.
+Your task: revise the draft to address the attending's feedback. Use the tool \
+evidence to support your revisions — do not add findings that lack tool support.
 
 Output ONLY the revised report in this exact format (no preamble, no markdown, no explanation):
 
@@ -566,9 +565,10 @@ Good examples:
 
 Rules:
 - 15-25 words MAX. Terse like a busy attending.
-- NEVER reveal findings, diagnoses, or what you see. Only express doubt or point to a region.
-- NEVER say "artifactual", "mass", "bowel", or any specific finding from the reference.
-- Speak as if YOU looked at the film. Never say "reference" or "ground truth."
+- You may dispute severity or question a finding the tools already flagged.
+- For missed findings: point to a REGION only ("check the right apex", "look below the diaphragm").
+  Do NOT name the finding itself ("there's a mass", "I see bowel loops").
+- Never say "reference" or "ground truth."
 - Plain text only. No markdown, no bullets."""
 
 
@@ -735,7 +735,7 @@ def run_checkpoint(args):
 
             feedback = (
                 "Attending feedback before you write the report: " + critique + "\n"
-                "Continue your investigation with this in mind and produce your final report."
+                "Keep this in mind as you continue your investigation."
             )
 
             # Phase 2: inject feedback and continue
