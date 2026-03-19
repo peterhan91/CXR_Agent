@@ -61,6 +61,8 @@ class AgentTrajectory:
     total_output_tokens: int = 0
     total_duration_ms: float = 0.0
     unused_tools: list = field(default_factory=list)
+    messages: list = field(default_factory=list, repr=False)
+    system_prompt: str = field(default="", repr=False)
 
 
 class CXRReActAgent:
@@ -268,8 +270,35 @@ class CXRReActAgent:
 
         start_time = time.time()
 
-        for iteration in range(self.max_iterations):
-            logger.info(f"Iteration {iteration + 1}/{self.max_iterations}")
+        self._react_loop(messages, system_prompt, trajectory, self.max_iterations)
+
+        trajectory.total_duration_ms = (time.time() - start_time) * 1000
+
+        # Log unused tools
+        used_tools = {s["tool_name"] for s in trajectory.steps if s.get("type") == "tool_call"}
+        trajectory.unused_tools = [t.name for t in self.tools if t.name not in used_tools]
+        if trajectory.unused_tools:
+            logger.info(f"Unused tools: {trajectory.unused_tools}")
+
+        # Save conversation state for potential feedback continuation
+        trajectory.messages = messages
+        trajectory.system_prompt = system_prompt
+
+        return trajectory
+
+    def _react_loop(
+        self,
+        messages: list,
+        system_prompt: str,
+        trajectory: AgentTrajectory,
+        max_iterations: int,
+    ):
+        """Core ReAct loop shared by run() and continue_with_feedback().
+
+        Mutates messages and trajectory in place.
+        """
+        for iteration in range(max_iterations):
+            logger.info(f"Iteration {iteration + 1}/{max_iterations}")
 
             # Call Claude Sonnet with tool definitions
             # Adaptive thinking follows mimic_skills pattern: when enabled,
@@ -391,9 +420,9 @@ class CXRReActAgent:
             # Max iterations reached without final report
             # Force extraction from last response (analogous to mimic_skills'
             # truncation + forced diagnosis in _construct_scratchpad Tier 2)
-            logger.warning(f"Max iterations ({self.max_iterations}) reached, forcing report extraction")
+            logger.warning(f"Max iterations ({max_iterations}) reached, forcing report extraction")
             trajectory.steps.append({
-                "iteration": self.max_iterations,
+                "iteration": max_iterations,
                 "type": "max_iterations_reached",
             })
             if not trajectory.final_report:
@@ -401,13 +430,49 @@ class CXRReActAgent:
                     messages, system_prompt, trajectory
                 )
 
-        trajectory.total_duration_ms = (time.time() - start_time) * 1000
+    def continue_with_feedback(
+        self,
+        messages: list,
+        system_prompt: str,
+        feedback: str,
+        trajectory: AgentTrajectory = None,
+        max_feedback_iterations: int = 5,
+    ) -> AgentTrajectory:
+        """Continue an agent run with radiologist feedback.
 
-        # Log unused tools
-        used_tools = {s["tool_name"] for s in trajectory.steps if s.get("type") == "tool_call"}
-        trajectory.unused_tools = [t.name for t in self.tools if t.name not in used_tools]
-        if trajectory.unused_tools:
-            logger.info(f"Unused tools: {trajectory.unused_tools}")
+        Appends feedback as a user message to the existing conversation,
+        then runs the ReAct loop for up to max_feedback_iterations more turns.
+        The agent can call tools to verify/ground new findings from feedback.
+
+        Args:
+            messages: Conversation messages from a prior run() call
+            system_prompt: System prompt from a prior run() call
+            feedback: Radiologist feedback text to inject
+            trajectory: Existing trajectory to extend (creates new if None)
+            max_feedback_iterations: Max additional iterations for feedback
+
+        Returns:
+            Extended AgentTrajectory with feedback-driven steps
+        """
+        messages = list(messages)  # don't mutate original
+        messages.append({"role": "user", "content": feedback})
+
+        if trajectory is None:
+            trajectory = AgentTrajectory(image_id="feedback", concept_prior="")
+
+        trajectory.steps.append({
+            "iteration": 0,
+            "type": "feedback_injection",
+            "text": feedback,
+        })
+
+        start_time = time.time()
+        self._react_loop(messages, system_prompt, trajectory, max_feedback_iterations)
+        trajectory.total_duration_ms += (time.time() - start_time) * 1000
+
+        # Update saved state
+        trajectory.messages = messages
+        trajectory.system_prompt = system_prompt
 
         return trajectory
 
