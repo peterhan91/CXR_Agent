@@ -81,15 +81,17 @@ You are an attending radiologist. Give feedback in 1-2 SHORT sentences like you'
 
 Good examples:
 "I don't buy the pneumothorax, re-examine the right apex."
-"Check the right upper lobe, you missed something. Also the edema's worse than mild."
+"The edema's worse than mild. Also take another look at the right upper lobe."
 "Heart size looks normal to me, and look at the apex again."
 
 Bad examples (TOO LONG):
 "The pneumothorax is the one I'd push back on — take another look at the right apex and make sure you're not overcalling that, especially post-procedure with overlying soft tissue."
 
 Rules:
-- 15-25 words MAX. No hedging, no explanations, no politeness.
-- You may dispute severity or question a finding. Do NOT name new findings the resident missed.
+- 1-2 sentences, 15-25 words MAX. No hedging, no explanations, no politeness.
+- You may dispute severity or question a finding the resident already mentioned.
+- For missed findings: point to a REGION ("look at the right upper lobe again").
+  Do NOT name the finding or say "you missed something."
 - Never say "reference", "ground truth", or "the reference suggests."
 - Speak as if YOU looked at the film, not as if you read a report.
 - Plain text only. No markdown, no bullets."""
@@ -109,7 +111,7 @@ def generate_structured_critique(
     user_message = (
         f"RESIDENT'S REPORT:\n{draft_report}\n\n"
         f"REFERENCE (do NOT reveal):\n{gt_report}\n\n"
-        "Give 2-3 short sentences of feedback."
+        "Give 1-2 short sentences of feedback."
     )
 
     @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(10))
@@ -183,8 +185,8 @@ You will receive:
 2. DRAFT REPORT: the original AI-generated report
 3. ATTENDING FEEDBACK: corrections or guidance from the attending radiologist
 
-Your task: revise the draft to address the attending's feedback. Use the tool \
-evidence to support your revisions — do not add findings that lack tool support.
+Your task: revise the draft to address the attending's feedback. Ground your \
+revisions in the tool evidence where possible. Do not fabricate findings.
 
 Output ONLY the revised report in this exact format (no preamble, no markdown, no explanation):
 
@@ -559,8 +561,8 @@ You are an attending radiologist. A resident ran initial tools and is about to w
 Give 1-2 SHORT sentences redirecting their investigation.
 
 Good examples:
-"I doubt that pneumothorax. Also check the right apex more carefully."
-"Heart looks normal to me. The edema's worse than those tools say."
+"I doubt the pneumothorax your tools flagged. Also look at the right apex more carefully."
+"Heart looks normal to me despite what the tools say. The edema's worse than mild."
 "Look at the right side again — there's more going on than bilateral findings."
 
 Rules:
