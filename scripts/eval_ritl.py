@@ -553,6 +553,275 @@ def run_agent_rerun(args):
         print(f"Errors: {errors}")
 
 
+# ─── Checkpoint Critique ──────────────────────────────────────────────────────
+
+CHECKPOINT_CRITIQUE_PROMPT = """\
+You are an attending radiologist. A resident ran initial tools and is about to write the report. \
+Give 1-2 SHORT sentences redirecting their investigation.
+
+Good examples:
+"I doubt that pneumothorax. Also check the right apex more carefully."
+"Heart looks normal to me. The edema's worse than those tools say."
+"Look at the right side again — there's more going on than bilateral findings."
+
+Rules:
+- 15-25 words MAX. Terse like a busy attending.
+- NEVER reveal findings, diagnoses, or what you see. Only express doubt or point to a region.
+- NEVER say "artifactual", "mass", "bowel", or any specific finding from the reference.
+- Speak as if YOU looked at the film. Never say "reference" or "ground truth."
+- Plain text only. No markdown, no bullets."""
+
+
+def generate_checkpoint_critique(
+    tool_evidence: str,
+    gt_report: str,
+    client: "anthropic.Anthropic",
+    model: str = "claude-sonnet-4-6",
+) -> tuple:
+    """Generate attending feedback based on tool outputs vs GT, before the report is written."""
+    user_message = (
+        f"TOOL OUTPUTS SO FAR:\n{tool_evidence}\n\n"
+        f"REFERENCE (do NOT reveal):\n{gt_report}\n\n"
+        "Give 1-2 short sentences of guidance before the resident writes the report."
+    )
+
+    @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(10))
+    def _call(**kwargs):
+        return client.messages.create(**kwargs)
+
+    response = _call(
+        model=model,
+        max_tokens=150,
+        temperature=0.0,
+        system=CHECKPOINT_CRITIQUE_PROMPT,
+        messages=[{"role": "user", "content": user_message}],
+    )
+    text_blocks = [b for b in response.content if b.type == "text"]
+    critique = "\n".join(b.text for b in text_blocks)
+    return critique, response.usage.input_tokens, response.usage.output_tokens
+
+
+# ─── Experiment 3: Checkpoint (mid-loop feedback) ────────────────────────────
+
+
+def run_checkpoint(args):
+    """Exp 3: Pause agent after initial tool calls, inject feedback, then continue.
+
+    More clinically realistic — feedback arrives before the agent commits to a
+    report, so it can redirect its verification strategy.
+    """
+    import yaml
+    from agent.react_agent import CXRReActAgent
+
+    output_dir = Path(args.output)
+    test_set = _load_test_set(output_dir, args)
+
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+
+    acfg = config.get("agent", {})
+    base_name = args.predictions_base
+    checkpoint_after = args.checkpoint_after
+
+    # CLEAR scorer
+    clear_cfg = config.get("clear", {})
+    scorer = None
+    if clear_cfg.get("enabled", True):
+        from clear.concept_scorer import CLEARConceptScorer
+        scorer = CLEARConceptScorer(
+            model_path=clear_cfg.get("model_path"),
+            concepts_path=clear_cfg.get("concepts_path"),
+            dinov2_model_name=clear_cfg.get("dinov2_model_name", "dinov2_vitb14"),
+            image_resolution=clear_cfg.get("image_resolution", 448),
+        )
+        scorer.load()
+
+    from scripts.eval_mimic import _build_tools
+    prompt_mode = acfg.get("prompt_mode", "current")
+    tools = _build_tools(config, prompt_mode=prompt_mode)
+
+    use_skills = config.get("skill", {}).get("enabled", True)
+    agent = CXRReActAgent(
+        model=acfg.get("model", "claude-sonnet-4-6"),
+        max_iterations=acfg.get("max_iterations", 10),
+        max_tokens=acfg.get("max_tokens", 4096),
+        temperature=acfg.get("temperature", 0.0),
+        tools=tools,
+        reasoning_effort=acfg.get("reasoning_effort"),
+        use_skills=use_skills,
+        prompt_mode=prompt_mode,
+    )
+
+    predictions_path = output_dir / f"predictions_{base_name}_ritl_checkpoint.json"
+    trajectories_path = output_dir / f"trajectories_{base_name}_ritl_checkpoint.jsonl"
+    existing = _load_existing_predictions(predictions_path)
+    predictions = list(existing.values())
+
+    total = len(test_set)
+    cum_in = sum(p.get("input_tokens", 0) for p in predictions)
+    cum_out = sum(p.get("output_tokens", 0) for p in predictions)
+    errors = 0
+    t_start = time.time()
+
+    if args.max_samples:
+        test_set = test_set[:args.max_samples]
+        total = len(test_set)
+
+    remaining_iterations = agent.max_iterations - checkpoint_after
+
+    for i, entry in enumerate(test_set):
+        study_id = entry["study_id"]
+        if study_id in existing:
+            continue
+
+        gt_report = entry.get("report_gt", "")
+        if not gt_report.strip():
+            continue
+
+        logger.info(f"[{i+1}/{total}] Checkpoint: study {study_id}")
+        t0 = time.time()
+
+        try:
+            # CLEAR
+            concept_prior = ""
+            if scorer:
+                top_k = config.get("clear", {}).get("top_k", 20)
+                prior_template = None
+                if prompt_mode == "initial":
+                    from agent.initial_mode import CONCEPT_PRIOR_TEMPLATE_INITIAL
+                    prior_template = CONCEPT_PRIOR_TEMPLATE_INITIAL
+                concept_prior = scorer.score_image(
+                    entry["image_path"], top_k=top_k, template=prior_template,
+                )
+
+            prior_report = ""
+            prior_image_path = ""
+            prior_study = entry.get("prior_study")
+            if prior_study and isinstance(prior_study, dict):
+                prior_report = prior_study.get("report", "")
+                prior_image_path = prior_study.get("image_path", "")
+
+            # Phase 1: initial tool calls (reports + classification)
+            from agent.react_agent import AgentTrajectory
+            trajectory = AgentTrajectory(
+                image_id=study_id, concept_prior=concept_prior,
+            )
+            system_prompt = agent._build_system_prompt(concept_prior)
+            messages = [{
+                "role": "user",
+                "content": agent._build_initial_message(
+                    entry["image_path"],
+                    prior_report=prior_report,
+                    prior_image_path=prior_image_path,
+                ),
+            }]
+
+            start_time = time.time()
+            agent._react_loop(
+                messages, system_prompt, trajectory,
+                max_iterations=checkpoint_after,
+                force_report_on_max=False,
+            )
+
+            # Extract tool evidence gathered so far
+            evidence = extract_tool_evidence({"steps": trajectory.steps})
+
+            # Generate checkpoint critique
+            critique, fb_in, fb_out = generate_checkpoint_critique(
+                evidence, gt_report, agent.client, args.model,
+            )
+            trajectory.total_input_tokens += fb_in
+            trajectory.total_output_tokens += fb_out
+
+            feedback = (
+                "Attending feedback before you write the report: " + critique + "\n"
+                "Continue your investigation with this in mind and produce your final report."
+            )
+
+            # Phase 2: inject feedback and continue
+            trajectory.steps.append({
+                "iteration": 0,
+                "type": "feedback_injection",
+                "text": feedback,
+            })
+            messages.append({"role": "user", "content": feedback})
+
+            agent._react_loop(
+                messages, system_prompt, trajectory,
+                max_iterations=remaining_iterations,
+            )
+
+            trajectory.total_duration_ms = (time.time() - start_time) * 1000
+            trajectory.messages = messages
+            trajectory.system_prompt = system_prompt
+
+            report = trajectory.final_report
+            in_tok = trajectory.total_input_tokens
+            out_tok = trajectory.total_output_tokens
+            steps = trajectory.steps
+
+        except Exception as e:
+            logger.error(f"Checkpoint failed for {study_id}: {e}", exc_info=True)
+            report = ""
+            in_tok = out_tok = 0
+            steps = []
+            errors += 1
+
+        wall_ms = (time.time() - t0) * 1000
+        cum_in += in_tok
+        cum_out += out_tok
+
+        clean_report, groundings = strip_groundings(report)
+
+        pred = {
+            "study_id": study_id,
+            "report_pred": clean_report,
+            "report_pred_raw": report,
+            "groundings": groundings,
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "num_steps": len(steps),
+            "wall_time_ms": wall_ms,
+            "base_model": base_name,
+            "feedback": feedback,
+            "checkpoint_after": checkpoint_after,
+        }
+        predictions.append(pred)
+        existing[study_id] = pred
+
+        traj_record = {
+            "study_id": study_id,
+            "concept_prior": concept_prior if scorer else "",
+            "input_tokens": in_tok,
+            "output_tokens": out_tok,
+            "num_steps": len(steps),
+            "wall_time_ms": wall_ms,
+            "groundings": groundings,
+            "feedback": feedback,
+            "checkpoint_after": checkpoint_after,
+            "steps": steps,
+        }
+        with open(trajectories_path, "a") as f:
+            f.write(json.dumps(traj_record) + "\n")
+
+        if len(predictions) % 5 == 0:
+            _save_predictions(predictions_path, predictions)
+            done = len(predictions)
+            elapsed = time.time() - t_start
+            logger.info(
+                f"[{done}/{total}] saved | "
+                f"tokens: {cum_in:,} in / {cum_out:,} out | "
+                f"{elapsed/60:.1f}min elapsed"
+            )
+
+    _save_predictions(predictions_path, predictions)
+    print(f"\nRITL checkpoint: {len(predictions)} predictions -> {predictions_path}")
+    print(f"Trajectories: {trajectories_path}")
+    print(f"Total tokens: {cum_in:,} input, {cum_out:,} output")
+    if errors:
+        print(f"Errors: {errors}")
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 
@@ -577,8 +846,8 @@ Examples:
     )
 
     parser.add_argument(
-        "--mode", required=True, choices=["text", "rerun"],
-        help="text: single Claude revision call | rerun: full agent + feedback",
+        "--mode", required=True, choices=["text", "rerun", "checkpoint"],
+        help="text: single Claude revision call | rerun: full agent + feedback | checkpoint: mid-loop feedback",
     )
     parser.add_argument(
         "--output", default="results/eval_v4/",
@@ -608,6 +877,10 @@ Examples:
         "--max_feedback_iterations", type=int, default=5,
         help="Max agent iterations after feedback injection (rerun mode, default: 5)",
     )
+    parser.add_argument(
+        "--checkpoint_after", type=int, default=2,
+        help="Pause after N iterations for checkpoint mode (default: 2)",
+    )
 
     # For _load_test_set compatibility
     parser.add_argument("--input", help="Path to eval data JSON (overrides test_set.json)")
@@ -626,6 +899,8 @@ Examples:
         run_text_revision(args)
     elif args.mode == "rerun":
         run_agent_rerun(args)
+    elif args.mode == "checkpoint":
+        run_checkpoint(args)
 
 
 if __name__ == "__main__":

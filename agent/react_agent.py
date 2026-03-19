@@ -292,10 +292,16 @@ class CXRReActAgent:
         system_prompt: str,
         trajectory: AgentTrajectory,
         max_iterations: int,
+        force_report_on_max: bool = True,
     ):
         """Core ReAct loop shared by run() and continue_with_feedback().
 
         Mutates messages and trajectory in place.
+
+        Args:
+            force_report_on_max: If True (default), forces a final report when
+                max_iterations is reached. Set False for checkpoint mode where
+                we want to pause mid-loop without producing a report.
         """
         for iteration in range(max_iterations):
             logger.info(f"Iteration {iteration + 1}/{max_iterations}")
@@ -418,17 +424,22 @@ class CXRReActAgent:
 
         else:
             # Max iterations reached without final report
-            # Force extraction from last response (analogous to mimic_skills'
-            # truncation + forced diagnosis in _construct_scratchpad Tier 2)
-            logger.warning(f"Max iterations ({max_iterations}) reached, forcing report extraction")
-            trajectory.steps.append({
-                "iteration": max_iterations,
-                "type": "max_iterations_reached",
-            })
-            if not trajectory.final_report:
-                trajectory.final_report = self._force_final_report(
-                    messages, system_prompt, trajectory
-                )
+            if force_report_on_max:
+                logger.warning(f"Max iterations ({max_iterations}) reached, forcing report extraction")
+                trajectory.steps.append({
+                    "iteration": max_iterations,
+                    "type": "max_iterations_reached",
+                })
+                if not trajectory.final_report:
+                    trajectory.final_report = self._force_final_report(
+                        messages, system_prompt, trajectory
+                    )
+            else:
+                logger.info(f"Checkpoint pause after {max_iterations} iterations")
+                trajectory.steps.append({
+                    "iteration": max_iterations,
+                    "type": "checkpoint_pause",
+                })
 
     def continue_with_feedback(
         self,
