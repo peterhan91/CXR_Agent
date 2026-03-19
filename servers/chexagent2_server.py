@@ -389,10 +389,10 @@ async def health():
 
 @app.post("/generate_report", response_model=ReportResponse)
 async def generate_report(req: ReportRequest):
-    """Generate a full report with FINDINGS (SRRG) + IMPRESSION (SRRG-impression)."""
+    """Generate a report: base model findings + SRRG impression model."""
     findings, t1 = generate(
-        models["srrg"], models["srrg_tok"],
-        [req.image_path], PROMPTS["srrg"], req.max_new_tokens,
+        models["base"], models["base_tok"],
+        [req.image_path], req.prompt, req.max_new_tokens,
     )
     impression, t2 = generate(
         models["srrg_imp"], models["srrg_imp_tok"],
