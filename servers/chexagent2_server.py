@@ -81,6 +81,7 @@ PROMPTS = {
         "Specify their positions with bounding box coordinates"
     ),
     "srrg": "Structured Radiology Report Generation for Findings Section",
+    "srrg_impression": "Structured Radiology Report Generation for Impression Section",
 }
 
 
@@ -262,13 +263,13 @@ def _correct_boxes_for_padding(boxes: list, orig_w: int, orig_h: int,
     return corrected
 
 
-def load_model(model_name: str):
+def load_model(model_name: str, device_map="auto"):
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    logger.info(f"Loading {model_name}...")
+    logger.info(f"Loading {model_name} (device_map={device_map})...")
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, device_map="auto", trust_remote_code=True
+        model_name, device_map=device_map, trust_remote_code=True
     )
     model = model.to(torch.bfloat16).eval()
     logger.info(f"{model_name} loaded")
@@ -276,7 +277,7 @@ def load_model(model_name: str):
 
 
 def generate(model, tokenizer, image_paths: list, prompt: str,
-             max_new_tokens: int = 512, device: str = "cuda") -> tuple:
+             max_new_tokens: int = 512) -> tuple:
     """Shared generation logic. Supports 0+ images."""
     parts = [{"image": p} for p in image_paths] + [{"text": prompt}]
     query = tokenizer.from_list_format(parts)
@@ -287,6 +288,9 @@ def generate(model, tokenizer, image_paths: list, prompt: str,
     input_ids = tokenizer.apply_chat_template(
         conv, add_generation_prompt=True, return_tensors="pt"
     )
+
+    # Use the model's own device (handles multi-GPU)
+    device = next(model.parameters()).device
 
     t0 = time.time()
     with torch.no_grad():
@@ -351,9 +355,24 @@ async def lifespan(app: FastAPI):
     models["srrg"], models["srrg_tok"] = load_model(
         "StanfordAIMI/CheXagent-2-3b-srrg-findings"
     )
-    # Patch both models for 16-bit PNG support
+    # Load impression model on GPU 2 if visible, else fall back to auto
+    import os
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    if "2" in visible.split(",") or not visible:
+        # GPU 2 is visible — find its logical index
+        gpu_list = visible.split(",") if visible else []
+        logical_idx = gpu_list.index("2") if "2" in gpu_list else 2
+        imp_device = {"": f"cuda:{logical_idx}"}
+    else:
+        imp_device = "auto"  # fall back to same GPU
+    models["srrg_imp"], models["srrg_imp_tok"] = load_model(
+        "StanfordAIMI/CheXagent-2-3b-srrg-impression",
+        device_map=imp_device,
+    )
+    # Patch all models for 16-bit PNG support
     _patch_visual_encoder(models["base"])
     _patch_visual_encoder(models["srrg"])
+    _patch_visual_encoder(models["srrg_imp"])
     yield
     models.clear()
 
@@ -370,6 +389,22 @@ async def health():
 
 @app.post("/generate_report", response_model=ReportResponse)
 async def generate_report(req: ReportRequest):
+    """Generate a full report with FINDINGS (SRRG) + IMPRESSION (SRRG-impression)."""
+    findings, t1 = generate(
+        models["srrg"], models["srrg_tok"],
+        [req.image_path], PROMPTS["srrg"], req.max_new_tokens,
+    )
+    impression, t2 = generate(
+        models["srrg_imp"], models["srrg_imp_tok"],
+        [req.image_path], PROMPTS["srrg_impression"], req.max_new_tokens,
+    )
+    report = f"FINDINGS:\n{findings.strip()}\n\nIMPRESSION:\n{impression.strip()}"
+    return ReportResponse(report=report, generation_time_ms=t1 + t2)
+
+
+@app.post("/generate_report_base", response_model=ReportResponse)
+async def generate_report_base(req: ReportRequest):
+    """Generate a free-text report using the base model (legacy)."""
     response, gen_time = generate(
         models["base"], models["base_tok"],
         [req.image_path], req.prompt, req.max_new_tokens,
@@ -382,6 +417,15 @@ async def generate_srrg(req: SRRGRequest):
     response, gen_time = generate(
         models["srrg"], models["srrg_tok"],
         [req.image_path], PROMPTS["srrg"], req.max_new_tokens,
+    )
+    return ReportResponse(report=response, generation_time_ms=gen_time)
+
+
+@app.post("/generate_srrg_impression", response_model=ReportResponse)
+async def generate_srrg_impression(req: SRRGRequest):
+    response, gen_time = generate(
+        models["srrg_imp"], models["srrg_imp_tok"],
+        [req.image_path], PROMPTS["srrg_impression"], req.max_new_tokens,
     )
     return ReportResponse(report=response, generation_time_ms=gen_time)
 
