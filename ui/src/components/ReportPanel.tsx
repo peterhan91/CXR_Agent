@@ -70,10 +70,11 @@ function stripMarkdown(text: string): string {
 
 function parseReport(report: string) {
   // 1. Standard agent format: FINDINGS: ... IMPRESSION: ...
+  // 1. Standard agent format: line starts with FINDINGS: (not **Key Findings:**)
   const findingsMatch = report.match(
-    /FINDINGS:\s*([\s\S]*?)(?=\n\s*IMPRESSION:|$)/i
+    /^FINDINGS:\s*([\s\S]*?)(?=\n\s*IMPRESSION:|$)/im
   );
-  const impressionMatch = report.match(/IMPRESSION:\s*([\s\S]*?)$/i);
+  const impressionMatch = report.match(/^IMPRESSION:\s*([\s\S]*?)$/im);
 
   if (findingsMatch) {
     return {
@@ -90,15 +91,28 @@ function parseReport(report: string) {
 
   for (const line of lines) {
     const stripped = line.replace(/\*/g, "").trim().toLowerCase();
-    if (/^key\s+findings:?$/i.test(stripped) || /^findings:?$/i.test(stripped)) {
+    // Findings headers: "Key Findings:", "Key findings include:", "...shows several findings:", etc.
+    if (/^(key\s+)?findings\s*(include)?:?$/.test(stripped) ||
+        /shows\s+several\s+(key\s+|notable\s+)?findings:?$/.test(stripped)) {
       currentSection = "findings";
       continue;
     }
-    if (/^(overall\s+)?impression:?$/i.test(stripped)) {
+    // Impression headers: "Overall Impression:", "Impression:", or "Overall, ..." / "Overall: ..."
+    if (/^(overall\s+)?impression:?$/.test(stripped)) {
       currentSection = "impression";
       continue;
     }
-    if (/^disclaimer:?/i.test(stripped)) {
+    if (/^overall[,:]/.test(stripped)) {
+      currentSection = "impression";
+      // This line has content after "Overall, " — keep it
+      const afterOverall = line.replace(/\*/g, "").replace(/^[^,:]+[,:]\s*/i, "").trim();
+      if (afterOverall) {
+        if (!sections[currentSection]) sections[currentSection] = [];
+        sections[currentSection].push(afterOverall);
+      }
+      continue;
+    }
+    if (/^disclaimer:?/i.test(stripped) || /^it is important to note/i.test(stripped)) {
       currentSection = "disclaimer";
       continue;
     }
@@ -143,9 +157,11 @@ function parseReport(report: string) {
 // Map model selector IDs to run modes
 const MODEL_TO_RUN_MODE: Record<string, string> = {
   agent_initial: "agent",
+  agent_initial_guided: "agent_guided",
   chexagent2: "chexagent2",
   chexone: "chexone",
   medgemma: "medgemma",
+  medversa: "medversa",
 };
 
 export default function ReportPanel({
@@ -156,66 +172,80 @@ export default function ReportPanel({
   const { selectedModel, setSelectedModel, showGroundTruth, toggleGroundTruth } =
     useStudyStore();
 
-  // Run state
-  const [liveRun, setLiveRun] = useState<RunStatus | null>(null);
+  // Run state — from store (shared with WorkflowPanel)
+  const liveRuns = useStudyStore((s) => s.liveRuns);
+  const setLiveRun = useStudyStore((s) => s.setLiveRun);
   const [feedback, setFeedback] = useState("");
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Clear live run when switching models
-  useEffect(() => {
-    setLiveRun(null);
-    setShowFeedbackInput(false);
-    setFeedback("");
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-  }, [selectedModel]);
+  const pollRefs = useRef<Record<string, NodeJS.Timeout>>({});
 
   useEffect(() => {
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => { Object.values(pollRefs.current).forEach(clearInterval); };
   }, []);
 
-  const startPolling = useCallback((runId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
+  const startPolling = useCallback((runId: string, modelKey: string) => {
+    if (pollRefs.current[modelKey]) clearInterval(pollRefs.current[modelKey]);
+    pollRefs.current[modelKey] = setInterval(async () => {
       try {
         const status = await pollRun(runId);
-        setLiveRun(status);
+        setLiveRun(modelKey, status);
         if (status.status === "complete" || status.status === "error") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
+          clearInterval(pollRefs.current[modelKey]);
+          delete pollRefs.current[modelKey];
         }
       } catch {
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
+        clearInterval(pollRefs.current[modelKey]);
+        delete pollRefs.current[modelKey];
       }
     }, 2000);
-  }, []);
+  }, [setLiveRun]);
 
-  const handleRun = useCallback(async () => {
-    const mode = MODEL_TO_RUN_MODE[selectedModel];
+  const handleRunMode = useCallback(async (modelKey: string) => {
+    const mode = MODEL_TO_RUN_MODE[modelKey];
     if (!mode) return;
-    setLiveRun({ run_id: "", study_id: study.study_id, mode, status: "queued", message: "Starting...", result: null, trajectory: null, ritl_result: null, ritl_trajectory_steps: null, elapsed_ms: 0 });
+    setShowFeedbackInput(false);
+    setFeedback("");
+    const empty: RunStatus = { run_id: "", study_id: study.study_id, mode, status: "queued", message: "Starting...", result: null, trajectory: null, ritl_result: null, ritl_trajectory_steps: null, elapsed_ms: 0 };
+    setLiveRun(modelKey, empty);
     try {
       const { run_id } = await startRun(study.study_id, mode);
-      startPolling(run_id);
+      startPolling(run_id, modelKey);
     } catch (e) {
-      setLiveRun((prev) => prev ? { ...prev, status: "error", message: String(e) } : null);
+      setLiveRun(modelKey, { ...empty, status: "error", message: String(e) });
     }
-  }, [selectedModel, study.study_id, startPolling]);
+  }, [study.study_id, startPolling, setLiveRun]);
+
+  const BASELINE_MODELS = ["chexagent2", "chexone", "medgemma", "medversa"];
+
+  const handleRunBaselines = useCallback(async () => {
+    for (const key of BASELINE_MODELS) {
+      if (!predictions[key]) {
+        handleRunMode(key);
+      }
+    }
+  }, [predictions, handleRunMode]);
 
   const handleFeedback = useCallback(async () => {
-    if (!liveRun || !feedback.trim()) return;
+    const agentRun = liveRuns["agent_initial"] || liveRuns["agent_initial_guided"];
+    if (!agentRun || !feedback.trim()) return;
+    if (agentRun.status !== "complete" && agentRun.status !== "awaiting_feedback") {
+      alert("Agent run must complete or reach checkpoint before giving feedback.");
+      return;
+    }
     try {
-      await submitFeedback(liveRun.run_id, feedback.trim());
+      const modelKey = liveRuns["agent_initial"] ? "agent_initial" : "agent_initial_guided";
+      await submitFeedback(agentRun.run_id, feedback.trim());
       setShowFeedbackInput(false);
       setFeedback("");
-      startPolling(liveRun.run_id);
+      startPolling(agentRun.run_id, modelKey);
     } catch (e) {
-      setLiveRun((prev) => prev ? { ...prev, status: "error", message: String(e) } : null);
+      const modelKey = liveRuns["agent_initial"] ? "agent_initial" : "agent_initial_guided";
+      setLiveRun(modelKey, { ...agentRun, status: "error", message: String(e) });
     }
-  }, [liveRun, feedback, startPolling]);
+  }, [liveRuns, feedback, startPolling, setLiveRun]);
 
   // Use live result if available, otherwise pre-computed
+  const liveRun = liveRuns[selectedModel] || null;
   const pred = liveRun?.status === "complete" && liveRun.result
     ? (liveRun.result as unknown as Prediction)
     : predictions[selectedModel];
@@ -230,10 +260,12 @@ export default function ReportPanel({
   const basePred = isRITL ? predictions[pred?.base_model || "agent_initial"] : null;
   const parsedBase = basePred ? parseReport(basePred.report_pred) : null;
 
-  // Organize models: base models first, then RITL variants
-  const baseModels = models.filter(
-    (m) => !m.includes("ritl")
-  );
+  // Always show runnable models + any that have predictions
+  const RUNNABLE = ["agent_initial", "chexagent2", "chexone", "medgemma", "medversa"];
+  const allBaseModels = Array.from(new Set([
+    ...RUNNABLE,
+    ...models.filter((m) => !m.includes("ritl")),
+  ]));
   const ritlModels = models.filter((m) => m.includes("ritl"));
 
   return (
@@ -241,19 +273,30 @@ export default function ReportPanel({
       {/* Model selector */}
       <div className="px-4 pt-4 pb-2 border-b border-separator space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
-          {baseModels.map((m) => (
-            <button
-              key={m}
-              onClick={() => setSelectedModel(m)}
-              className={`px-3 py-1 text-xs rounded-full transition-colors ${
-                selectedModel === m
-                  ? "bg-accent text-white"
-                  : "bg-bg-elevated text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              {m.replace("agent_initial", "Agent").replace("chexagent2", "CheXagent-2").replace("chexone", "CheXOne").replace("medgemma", "MedGemma").replace("medversa", "MedVersa")}
-            </button>
-          ))}
+          {allBaseModels.map((m) => {
+            const hasPred = !!predictions[m];
+            const lr = liveRuns[m];
+            const isRunning = lr?.status === "queued" || lr?.status === "running";
+            const isDone = lr?.status === "complete";
+            const label = m.replace("agent_initial", "Agent").replace("chexagent2", "CheXagent-2").replace("chexone", "CheXOne").replace("medgemma", "MedGemma").replace("medversa", "MedVersa");
+            return (
+              <button
+                key={m}
+                onClick={() => setSelectedModel(m)}
+                className={`px-3 py-1 text-xs rounded-full transition-colors inline-flex items-center gap-1 ${
+                  selectedModel === m
+                    ? "bg-accent text-white"
+                    : hasPred || isDone
+                      ? "bg-bg-elevated text-text-secondary hover:text-text-primary"
+                      : "bg-bg-elevated/50 text-text-tertiary hover:text-text-secondary border border-dashed border-separator"
+                }`}
+              >
+                {label}
+                {isRunning && <span className="inline-block w-2 h-2 border border-current border-t-transparent rounded-full animate-spin" />}
+                {isDone && !hasPred && <span className="text-semantic-green">&#10003;</span>}
+              </button>
+            );
+          })}
         </div>
         {ritlModels.length > 0 && (
           <div className="space-y-1.5">
@@ -291,6 +334,14 @@ export default function ReportPanel({
           >
             {showGroundTruth ? "Hide" : "Show"} Ground Truth
           </button>
+          {MODEL_TO_RUN_MODE[selectedModel] && (pred || liveRun?.status === "complete") && (
+            <button
+              onClick={() => handleRunMode(selectedModel)}
+              className="px-3 py-1 text-[10px] rounded-full bg-bg-elevated text-text-primary hover:text-white transition-colors"
+            >
+              Re-run
+            </button>
+          )}
         </div>
       </div>
 
@@ -344,6 +395,21 @@ export default function ReportPanel({
                 </div>
               </div>
             )}
+
+            {/* Run buttons inside GT view when no prediction */}
+            {!pred && !liveRun && (
+              <div className="flex gap-2 pt-2">
+                {selectedModel === "agent_initial" && (
+                  <button onClick={() => handleRunMode("agent_initial")} className="px-4 py-1.5 text-xs font-semibold rounded-full bg-semantic-green text-black hover:bg-semantic-green/80">Run Agent</button>
+                )}
+                {selectedModel !== "agent_initial" && MODEL_TO_RUN_MODE[selectedModel] && (
+                  <button onClick={() => handleRunMode(selectedModel)} className="px-4 py-1.5 text-xs font-semibold rounded-full bg-semantic-green text-black hover:bg-semantic-green/80">
+                    Run {selectedModel.replace("chexagent2", "CheXagent-2").replace("chexone", "CheXOne").replace("medgemma", "MedGemma").replace("medversa", "MedVersa")}
+                  </button>
+                )}
+                <button onClick={handleRunBaselines} className="px-4 py-1.5 text-xs rounded-full bg-accent text-white hover:bg-accent-hover">Run All Baselines</button>
+              </div>
+            )}
           </div>
         ) : isRITL && parsedBase && parsedPred ? (
           /* Diff view: original → revised for RITL */
@@ -384,23 +450,56 @@ export default function ReportPanel({
                 />
               </>
             )}
-            {!pred && !liveRun && MODEL_TO_RUN_MODE[selectedModel] && (
-              <div className="text-center py-8 space-y-3">
+            {!pred && !liveRun && (
+              <div className="text-center py-8 space-y-4">
                 <p className="text-sm text-text-tertiary">
-                  No pre-computed result for this model.
+                  No result yet.
                 </p>
-                <button
-                  onClick={handleRun}
-                  className="px-5 py-2 text-sm font-semibold rounded-full bg-semantic-green text-black hover:bg-semantic-green/80 transition-colors"
-                >
-                  Run {selectedModel === "agent_initial" ? "Agent" : selectedModel.replace("chexagent2", "CheXagent-2").replace("chexone", "CheXOne").replace("medgemma", "MedGemma")}
-                </button>
+                <div className="flex flex-col items-center gap-3">
+                  {selectedModel === "agent_initial" && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleRunMode("agent_initial")}
+                        className="px-5 py-2 text-sm font-semibold rounded-full bg-semantic-green text-black hover:bg-semantic-green/80 transition-colors"
+                      >
+                        Run Agent (Revised)
+                      </button>
+                      <button
+                        onClick={() => {
+                          // Store guided run under "agent_initial" key so it shows in the same tab
+                          const mode = "agent_guided";
+                          const empty: RunStatus = { run_id: "", study_id: study.study_id, mode, status: "queued", message: "Starting guided agent...", result: null, trajectory: null, ritl_result: null, ritl_trajectory_steps: null, elapsed_ms: 0 };
+                          setLiveRun("agent_initial", empty);
+                          setShowFeedbackInput(false);
+                          setFeedback("");
+                          startRun(study.study_id, mode).then(({ run_id }) => {
+                            startPolling(run_id, "agent_initial");
+                          }).catch((e) => {
+                            setLiveRun("agent_initial", { ...empty, status: "error", message: String(e) });
+                          });
+                        }}
+                        className="px-5 py-2 text-sm font-semibold rounded-full bg-semantic-orange text-black hover:bg-semantic-orange/80 transition-colors"
+                      >
+                        Run Agent (Guided)
+                      </button>
+                    </div>
+                  )}
+                  {selectedModel !== "agent_initial" && MODEL_TO_RUN_MODE[selectedModel] && (
+                    <button
+                      onClick={() => handleRunMode(selectedModel)}
+                      className="px-5 py-2 text-sm font-semibold rounded-full bg-semantic-green text-black hover:bg-semantic-green/80 transition-colors"
+                    >
+                      Run {selectedModel.replace("chexagent2", "CheXagent-2").replace("chexone", "CheXOne").replace("medgemma", "MedGemma").replace("medversa", "MedVersa")}
+                    </button>
+                  )}
+                  <button
+                    onClick={handleRunBaselines}
+                    className="px-4 py-1.5 text-xs rounded-full bg-accent text-white hover:bg-accent-hover transition-colors"
+                  >
+                    Run All Baselines
+                  </button>
+                </div>
               </div>
-            )}
-            {!pred && !liveRun && !MODEL_TO_RUN_MODE[selectedModel] && (
-              <p className="text-sm text-text-tertiary italic">
-                No prediction from this model for this study.
-              </p>
             )}
             {/* Live run status */}
             {liveRun && (liveRun.status === "queued" || liveRun.status === "running") && (
@@ -414,11 +513,23 @@ export default function ReportPanel({
                 </p>
               </div>
             )}
+            {liveRun?.status === "awaiting_feedback" && (
+              <div className="py-3 space-y-3">
+                <div className="bg-semantic-orange/10 border border-semantic-orange/30 rounded-panel px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-semantic-orange mb-2">
+                    Agent Summary — Awaiting Review
+                  </p>
+                  <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
+                    {liveRun.message}
+                  </div>
+                </div>
+              </div>
+            )}
             {liveRun?.status === "error" && (
               <div className="text-center py-4 space-y-2">
                 <p className="text-sm text-semantic-red">{liveRun.message}</p>
                 <button
-                  onClick={handleRun}
+                  onClick={() => handleRunMode(selectedModel)}
                   className="px-4 py-1 text-xs rounded-full bg-bg-elevated text-text-primary hover:text-white"
                 >
                   Retry
@@ -444,8 +555,9 @@ export default function ReportPanel({
           </div>
         )}
 
-        {/* RITL feedback — available for live agent runs */}
-        {liveRun?.status === "complete" && liveRun.mode === "agent" && !liveRun.ritl_result && (
+        {/* RITL feedback — available for live agent runs (Revised or Guided), supports multiple rounds */}
+        {(liveRun?.status === "complete" || liveRun?.status === "awaiting_feedback") &&
+         (liveRun.mode === "agent" || liveRun.mode === "agent_guided") && (
           <div className="border-t border-separator pt-3 space-y-2">
             {!showFeedbackInput ? (
               <button
@@ -483,19 +595,37 @@ export default function ReportPanel({
           </div>
         )}
 
-        {/* RITL revised result */}
-        {liveRun?.ritl_result && (
-          <div className="border-t border-separator pt-3 space-y-2">
-            <div className="bg-semantic-orange/10 border border-semantic-orange/30 rounded-panel px-3 py-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-semantic-orange">
-                Revised after feedback
-              </span>
+        {/* RITL revised result — diff against original */}
+        {liveRun?.ritl_result && (() => {
+          const originalReport = (liveRun.result as Record<string, string>)?.report_pred || "";
+          const revisedReport = (liveRun.ritl_result as Record<string, string>).report_pred || "";
+          const origParsed = parseReport(originalReport);
+          const revParsed = parseReport(revisedReport);
+          return (
+            <div className="border-t border-separator pt-3 space-y-3">
+              <div className="bg-semantic-orange/10 border border-semantic-orange/30 rounded-panel px-3 py-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-semantic-orange">
+                  Revised after feedback
+                </span>
+                <span className="ml-2 text-[10px] text-text-tertiary font-normal">
+                  (<span className="text-semantic-red">removed</span>
+                  {" / "}
+                  <span className="text-semantic-green">added</span>)
+                </span>
+              </div>
+              <ReportDiff
+                original={origParsed.findings}
+                revised={revParsed.findings}
+                label="Findings"
+              />
+              <ReportDiff
+                original={origParsed.impression}
+                revised={revParsed.impression}
+                label="Impression"
+              />
             </div>
-            <div className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap">
-              {(liveRun.ritl_result as Record<string, string>).report_pred}
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

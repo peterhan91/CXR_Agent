@@ -78,7 +78,7 @@ export interface RunStatus {
   run_id: string;
   study_id: string;
   mode: string;
-  status: "queued" | "running" | "complete" | "error";
+  status: "queued" | "running" | "complete" | "awaiting_feedback" | "error";
   message: string;
   result: Record<string, unknown> | null;
   trajectory: Record<string, unknown> | null;

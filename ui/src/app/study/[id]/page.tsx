@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getStudyDetail } from "@/lib/api";
 import type { StudyDetailResponse } from "@/lib/types";
+import { useStudyStore } from "@/stores/studyStore";
 import CXRViewer from "@/components/CXRViewer";
 import ReportPanel from "@/components/ReportPanel";
 import WorkflowPanel from "@/components/WorkflowPanel";
@@ -14,13 +15,17 @@ export default function StudyViewerPage() {
   const studyId = params.id as string;
   const [data, setData] = useState<StudyDetailResponse | null>(null);
   const [error, setError] = useState<string>("");
+  const resetStudy = useStudyStore((s) => s.resetStudy);
 
   useEffect(() => {
     if (!studyId) return;
+    resetStudy();
+    setData(null);
+    setError("");
     getStudyDetail(decodeURIComponent(studyId))
       .then(setData)
       .catch((e) => setError(e.message));
-  }, [studyId]);
+  }, [studyId, resetStudy]);
 
   if (error) {
     return (

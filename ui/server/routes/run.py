@@ -37,6 +37,7 @@ BASELINE_ENDPOINTS = {
     "chexagent2": {"url": "http://localhost:8001/generate_report", "payload_key": "image_path"},
     "chexone": {"url": "http://localhost:8002/generate_report", "payload_key": "image_path"},
     "medgemma": {"url": "http://localhost:8010/generate_report", "payload_key": "image_path"},
+    "medversa": {"url": "http://localhost:8004/generate_report", "payload_key": "image_path"},
 }
 
 # Lazy-loaded agent components
@@ -44,12 +45,30 @@ _agent = None
 _test_set_by_id: dict[str, dict] = {}
 
 
+DATA_DIR = PROJECT_ROOT / "data" / "eval"
+_DATASET_FILES = [
+    "mimic_cxr_test.json",
+    "iu_xray_test.json",
+    "chexpert_plus_valid.json",
+    "rexgradient_test.json",
+]
+
+
 def _load_test_set():
     global _test_set_by_id
     if not _test_set_by_id:
+        # Load eval_v4 test set first
         with open(TEST_SET_PATH) as f:
-            data = json.load(f)
-        _test_set_by_id = {s["study_id"]: s for s in data}
+            for s in json.load(f):
+                _test_set_by_id[s["study_id"]] = s
+        # Then load all full datasets
+        for fname in _DATASET_FILES:
+            p = DATA_DIR / fname
+            if p.exists():
+                with open(p) as f:
+                    for s in json.load(f):
+                        if s["study_id"] not in _test_set_by_id:
+                            _test_set_by_id[s["study_id"]] = s
     return _test_set_by_id
 
 
@@ -87,7 +106,7 @@ def _get_agent():
 
 class RunRequest(BaseModel):
     study_id: str
-    mode: str = "agent"  # "agent", "chexagent2", "chexone", "medgemma"
+    mode: str = "agent"  # "agent", "agent_guided", "chexagent2", "chexone", "medgemma", "medversa"
 
 
 class FeedbackRequest(BaseModel):
@@ -96,8 +115,8 @@ class FeedbackRequest(BaseModel):
 
 # ── Background runners ────────────────────────────────────────────────────────
 
-def _run_agent_background(run_id: str, study: dict):
-    """Run the full agent in a background thread."""
+def _run_agent_background(run_id: str, study: dict, guided: bool = False):
+    """Run the agent in a background thread. If guided=True, pause after 2 iterations for checkpoint."""
     run = _runs[run_id]
     try:
         run["status"] = "running"
@@ -111,8 +130,31 @@ def _run_agent_background(run_id: str, study: dict):
             prior_report = study["prior_study"].get("report", "")
             prior_image_path = study["prior_study"].get("image_path", "")
 
-        run["message"] = "Agent running..."
+        run["message"] = "Agent running (guided)..." if guided else "Agent running..."
         t0 = time.time()
+
+        # Monkey-patch the agent to capture the trajectory object mid-run
+        # so we can stream partial steps via the poll endpoint
+        original_react_loop = agent._react_loop
+        original_max_iters = agent.max_iterations
+
+        if guided:
+            # Guided mode: let the agent investigate fully, but intercept
+            # right before it writes the final report (when it stops calling tools).
+            # We do this by patching _react_loop to set force_report_on_max=False
+            # AND by intercepting the "no tool calls" branch: when the agent
+            # decides to write its report, we save the draft but mark as checkpoint.
+            def _patched_react_loop(messages, system_prompt, traj, max_iters, **kwargs):
+                run["_live_trajectory"] = traj
+                # Run the loop but don't force report — let it stop naturally
+                # We intercept the final report in the trajectory after the loop
+                return original_react_loop(messages, system_prompt, traj, max_iters, force_report_on_max=False)
+        else:
+            def _patched_react_loop(messages, system_prompt, traj, max_iters, **kwargs):
+                run["_live_trajectory"] = traj
+                return original_react_loop(messages, system_prompt, traj, max_iters, **kwargs)
+
+        agent._react_loop = _patched_react_loop
 
         trajectory = agent.run(
             image_path=image_path,
@@ -121,27 +163,62 @@ def _run_agent_background(run_id: str, study: dict):
             prior_report=prior_report,
             prior_image_path=prior_image_path,
         )
+        agent._react_loop = original_react_loop
+        agent.max_iterations = original_max_iters
 
         wall_time = (time.time() - t0) * 1000
 
-        # Format steps
+        # Format steps — only include actual tool calls
         steps = []
         for s in trajectory.steps:
+            if isinstance(s, dict) and s.get("type") != "tool_call":
+                continue
             steps.append({
                 "iteration": s.get("iteration", 0) if isinstance(s, dict) else 0,
                 "type": "tool_call",
                 "tool_name": s.get("tool_name", "") if isinstance(s, dict) else s.tool_name,
                 "tool_input": s.get("tool_input", {}) if isinstance(s, dict) else s.tool_input,
-                "tool_output": s.get("output", "") if isinstance(s, dict) else s.output,
+                "tool_output": s.get("tool_output", s.get("output", "")) if isinstance(s, dict) else s.output,
                 "duration_ms": s.get("duration_ms", 0) if isinstance(s, dict) else s.duration_ms,
+                "parallel_count": s.get("parallel_count", 1) if isinstance(s, dict) else 1,
             })
 
-        run["status"] = "complete"
-        run["message"] = "Done"
+        if guided:
+            # Generate a checkpoint summary for the attending
+            draft = trajectory.final_report or ""
+            if draft:
+                try:
+                    import anthropic as _anth
+                    _client = _anth.Anthropic()
+                    summary_resp = _client.messages.create(
+                        model="claude-sonnet-4-6",
+                        max_tokens=500,
+                        temperature=0.0,
+                        system="You are presenting CXR findings to an attending radiologist for review. Be concise and clinical.",
+                        messages=[{"role": "user", "content": (
+                            f"The AI agent investigated this chest X-ray using multiple tools and produced this draft report:\n\n"
+                            f"{draft}\n\n"
+                            f"Summarize the key findings as a bullet list for attending review. "
+                            f"Flag any findings where tool agreement was low or uncertain. "
+                            f"End with: 'Please review and provide feedback before I finalize.'"
+                        )}],
+                    )
+                    checkpoint_summary = summary_resp.content[0].text
+                except Exception as e:
+                    logger.warning(f"Failed to generate checkpoint summary: {e}")
+                    checkpoint_summary = draft
+            else:
+                checkpoint_summary = "Agent completed investigation but did not produce a draft. Review tool outputs and provide guidance."
+
+            run["status"] = "awaiting_feedback"
+            run["message"] = checkpoint_summary
+        else:
+            run["status"] = "complete"
+            run["message"] = "Done"
         run["result"] = {
             "study_id": study["study_id"],
-            "report_pred": trajectory.final_report,
-            "report_pred_raw": trajectory.final_report,
+            "report_pred": trajectory.final_report or "",
+            "report_pred_raw": trajectory.final_report or "",
             "num_steps": len(trajectory.steps),
             "wall_time_ms": wall_time,
             "input_tokens": trajectory.total_input_tokens,
@@ -205,7 +282,7 @@ def _run_baseline_background(run_id: str, study: dict, model: str):
 
 
 def _run_ritl_feedback_background(run_id: str, feedback: str):
-    """Continue an agent run with RITL feedback."""
+    """Continue an agent run with RITL feedback. Supports multiple rounds."""
     run = _runs[run_id]
     parent_messages = run.get("_messages", [])
     parent_system = run.get("_system_prompt", "")
@@ -222,51 +299,55 @@ def _run_ritl_feedback_background(run_id: str, feedback: str):
         agent = _get_agent()
         t0 = time.time()
 
-        # Inject feedback as user message and continue the loop
-        import copy
-        messages = copy.deepcopy(parent_messages)
-        messages.append({"role": "user", "content": feedback})
-
-        # Re-enter the agent loop manually
-        from agent.react_agent import AgentTrajectory
-        trajectory = AgentTrajectory(
-            image_id=run["study_id"],
-            concept_prior="",
-            messages=messages,
+        trajectory = agent.continue_with_feedback(
+            messages=parent_messages,
             system_prompt=parent_system,
-        )
-
-        # Use the agent's internal loop
-        trajectory = agent._continue_loop(
-            messages=messages,
-            system_prompt=parent_system,
-            trajectory=trajectory,
+            feedback=feedback,
         )
 
         wall_time = (time.time() - t0) * 1000
 
         steps = []
         for s in trajectory.steps:
+            if isinstance(s, dict) and s.get("type") != "tool_call":
+                continue
             steps.append({
                 "iteration": s.get("iteration", 0) if isinstance(s, dict) else 0,
                 "type": "tool_call",
                 "tool_name": s.get("tool_name", "") if isinstance(s, dict) else s.tool_name,
                 "tool_input": s.get("tool_input", {}) if isinstance(s, dict) else s.tool_input,
-                "tool_output": s.get("output", "") if isinstance(s, dict) else s.output,
+                "tool_output": s.get("tool_output", s.get("output", "")) if isinstance(s, dict) else s.output,
                 "duration_ms": s.get("duration_ms", 0) if isinstance(s, dict) else s.duration_ms,
+                "parallel_count": s.get("parallel_count", 1) if isinstance(s, dict) else 1,
             })
 
-        run["ritl_status"] = "complete"
+        # Track feedback rounds
+        round_num = run.get("_feedback_round", 0) + 1
+        run["_feedback_round"] = round_num
+
+        # Append to existing RITL steps (for multiple rounds)
+        prev_ritl_steps = run.get("ritl_trajectory_steps") or []
+        all_ritl_steps = prev_ritl_steps + steps
+
+        # Update the original result with the revised report
+        prev_report = run.get("ritl_result", {}).get("report_pred") or (run.get("result", {}) or {}).get("report_pred", "")
+
         run["ritl_result"] = {
             "study_id": run["study_id"],
             "report_pred": trajectory.final_report,
+            "report_pred_prev": prev_report,
             "feedback": feedback,
-            "num_steps": len(trajectory.steps),
+            "round": round_num,
+            "num_steps": len(steps),
             "wall_time_ms": wall_time,
         }
-        run["ritl_trajectory_steps"] = steps
+        run["ritl_trajectory_steps"] = all_ritl_steps
         run["status"] = "complete"
-        run["message"] = "RITL revision complete"
+        run["message"] = f"RITL revision complete (round {round_num})"
+
+        # Update messages for next round
+        run["_messages"] = trajectory.messages
+        run["_system_prompt"] = trajectory.system_prompt
 
     except Exception as e:
         logger.error(f"RITL {run_id} failed: {e}", exc_info=True)
@@ -284,7 +365,7 @@ async def start_run(req: RunRequest):
     if not study:
         raise HTTPException(404, f"Study not found: {req.study_id}")
 
-    if req.mode not in ("agent", "chexagent2", "chexone", "medgemma"):
+    if req.mode not in ("agent", "agent_guided", "chexagent2", "chexone", "medgemma", "medversa"):
         raise HTTPException(400, f"Invalid mode: {req.mode}")
 
     run_id = str(uuid.uuid4())[:8]
@@ -299,9 +380,10 @@ async def start_run(req: RunRequest):
         "started_at": time.time(),
     }
 
-    if req.mode == "agent":
+    if req.mode in ("agent", "agent_guided"):
+        guided = req.mode == "agent_guided"
         thread = threading.Thread(
-            target=_run_agent_background, args=(run_id, study), daemon=True
+            target=_run_agent_background, args=(run_id, study, guided), daemon=True
         )
     else:
         thread = threading.Thread(
@@ -319,7 +401,32 @@ async def get_run(run_id: str):
     if not run:
         raise HTTPException(404, f"Run not found: {run_id}")
 
-    # Don't expose internal state
+    # Build live partial steps if agent is still running
+    trajectory = run.get("trajectory")
+    if not trajectory and run.get("_live_trajectory"):
+        live_traj = run["_live_trajectory"]
+        live_steps = []
+        for s in live_traj.steps:
+            if not isinstance(s, dict) or s.get("type") != "tool_call":
+                continue
+            live_steps.append({
+                "iteration": s.get("iteration", 0),
+                "type": "tool_call",
+                "tool_name": s.get("tool_name", ""),
+                "tool_input": s.get("tool_input", {}),
+                "tool_output": s.get("tool_output", ""),
+                "duration_ms": s.get("duration_ms", 0),
+                "parallel_count": s.get("parallel_count", 1),
+            })
+        if live_steps:
+            trajectory = {
+                "study_id": run["study_id"],
+                "steps": live_steps,
+                "num_steps": len(live_steps),
+                "wall_time_ms": (time.time() - run["started_at"]) * 1000,
+            }
+            run["message"] = f"Running... ({len(live_steps)} tool calls)"
+
     return {
         "run_id": run["run_id"],
         "study_id": run["study_id"],
@@ -327,7 +434,7 @@ async def get_run(run_id: str):
         "status": run["status"],
         "message": run["message"],
         "result": run.get("result"),
-        "trajectory": run.get("trajectory"),
+        "trajectory": trajectory,
         "ritl_result": run.get("ritl_result"),
         "ritl_trajectory_steps": run.get("ritl_trajectory_steps"),
         "elapsed_ms": (time.time() - run["started_at"]) * 1000,
@@ -340,10 +447,10 @@ async def submit_feedback(run_id: str, req: FeedbackRequest):
     run = _runs.get(run_id)
     if not run:
         raise HTTPException(404, f"Run not found: {run_id}")
-    if run["mode"] != "agent":
+    if run["mode"] not in ("agent", "agent_guided"):
         raise HTTPException(400, "Feedback only supported for agent runs")
-    if run["status"] != "complete":
-        raise HTTPException(400, "Agent run must be complete before feedback")
+    if run["status"] not in ("complete", "awaiting_feedback"):
+        raise HTTPException(400, "Agent run must be complete or at checkpoint before feedback")
 
     run["status"] = "running"
     run["message"] = "Processing feedback..."

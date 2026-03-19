@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { RunStatus } from "@/lib/api";
 
 interface StudyViewState {
   // Image controls
@@ -15,6 +16,9 @@ interface StudyViewState {
   // Trajectory
   expandedSteps: Set<number>;
 
+  // Live runs (per model key)
+  liveRuns: Record<string, RunStatus>;
+
   // Actions
   setBrightness: (v: number) => void;
   setContrast: (v: number) => void;
@@ -24,6 +28,9 @@ interface StudyViewState {
   setSelectedModel: (m: string) => void;
   toggleGroundTruth: () => void;
   toggleStep: (i: number) => void;
+  setLiveRun: (modelKey: string, run: RunStatus) => void;
+  updateLiveRun: (modelKey: string, update: Partial<RunStatus>) => void;
+  resetStudy: () => void;
 }
 
 export const useStudyStore = create<StudyViewState>((set) => ({
@@ -35,6 +42,7 @@ export const useStudyStore = create<StudyViewState>((set) => ({
   selectedModel: "agent_initial",
   showGroundTruth: false,
   expandedSteps: new Set(),
+  liveRuns: {},
 
   setBrightness: (v) => set({ brightness: v }),
   setContrast: (v) => set({ contrast: v }),
@@ -51,5 +59,26 @@ export const useStudyStore = create<StudyViewState>((set) => ({
       if (next.has(i)) next.delete(i);
       else next.add(i);
       return { expandedSteps: next };
+    }),
+  setLiveRun: (modelKey, run) =>
+    set((s) => ({ liveRuns: { ...s.liveRuns, [modelKey]: run } })),
+  updateLiveRun: (modelKey, update) =>
+    set((s) => ({
+      liveRuns: {
+        ...s.liveRuns,
+        [modelKey]: { ...s.liveRuns[modelKey], ...update } as RunStatus,
+      },
+    })),
+  resetStudy: () =>
+    set({
+      brightness: 100,
+      contrast: 100,
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      selectedModel: "agent_initial",
+      showGroundTruth: false,
+      expandedSteps: new Set(),
+      liveRuns: {},
     }),
 }));
