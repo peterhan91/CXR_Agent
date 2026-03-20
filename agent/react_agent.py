@@ -16,7 +16,6 @@ Key differences from mimic_skills:
 
 import base64
 import mimetypes
-import re
 import time
 import logging
 from typing import Any, Optional
@@ -370,10 +369,6 @@ class CXRReActAgent:
                 # No tool calls — model is done reasoning, extract final report
                 text_blocks = [b for b in assistant_content if b.type == "text"]
                 final_text = "\n".join(b.text for b in text_blocks)
-                # Strip reasoning preamble — keep only from FINDINGS: onward
-                report_start = re.search(r'^FINDINGS:', final_text, re.MULTILINE | re.IGNORECASE)
-                if report_start:
-                    final_text = final_text[report_start.start():]
                 trajectory.final_report = final_text
                 trajectory.steps.append({
                     "iteration": iteration + 1,
@@ -471,14 +466,7 @@ class CXRReActAgent:
             Extended AgentTrajectory with feedback-driven steps
         """
         messages = list(messages)  # don't mutate original
-        feedback_message = (
-            f"Attending feedback: {feedback}\n\n"
-            "Re-examine with your tools and revise your report. "
-            "Your final response must contain ONLY the revised report "
-            "with FINDINGS:, IMPRESSION:, and GROUNDINGS: sections — "
-            "no reasoning, no tool-output analysis, no preamble."
-        )
-        messages.append({"role": "user", "content": feedback_message})
+        messages.append({"role": "user", "content": feedback})
 
         if trajectory is None:
             trajectory = AgentTrajectory(image_id="feedback", concept_prior="")
@@ -671,9 +659,4 @@ class CXRReActAgent:
         trajectory.total_output_tokens += response.usage.output_tokens
 
         text_blocks = [b for b in response.content if b.type == "text"]
-        final_text = "\n".join(b.text for b in text_blocks)
-        # Strip reasoning preamble
-        report_start = re.search(r'^FINDINGS:', final_text, re.MULTILINE | re.IGNORECASE)
-        if report_start:
-            final_text = final_text[report_start.start():]
-        return final_text
+        return "\n".join(b.text for b in text_blocks)
