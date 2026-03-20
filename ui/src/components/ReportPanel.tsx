@@ -183,6 +183,7 @@ export default function ReportPanel({
   const setLiveRun = useStudyStore((s) => s.setLiveRun);
   const [feedback, setFeedback] = useState("");
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
+  const [ritlTab, setRitlTab] = useState<"revised" | "original" | "diff">("revised");
   const pollRefs = useRef<Record<string, NodeJS.Timeout>>({});
 
   useEffect(() => {
@@ -243,6 +244,7 @@ export default function ReportPanel({
       await submitFeedback(agentRun.run_id, feedback.trim());
       setShowFeedbackInput(false);
       setFeedback("");
+      setRitlTab("revised");
       startPolling(agentRun.run_id, modelKey);
     } catch (e) {
       const modelKey = liveRuns["agent_initial"] ? "agent_initial" : "agent_initial_guided";
@@ -252,10 +254,15 @@ export default function ReportPanel({
 
   // Use live result if available, otherwise pre-computed
   const liveRun = liveRuns[selectedModel] || null;
-  const pred = liveRun?.status === "complete" && liveRun.result
+  const hasRitl = !!(liveRun?.ritl_result);
+  const origPred = liveRun?.status === "complete" && liveRun.result
     ? (liveRun.result as unknown as Prediction)
     : predictions[selectedModel];
+  const ritlPred = hasRitl ? (liveRun!.ritl_result as unknown as Prediction) : null;
+  const pred = hasRitl && ritlTab === "revised" ? ritlPred! : origPred;
   const parsedPred = pred ? parseReport(pred.report_pred) : null;
+  const parsedOrig = origPred ? parseReport(origPred.report_pred) : null;
+  const parsedRitl = ritlPred ? parseReport(ritlPred.report_pred) : null;
   const parsedGT = {
     findings: study.findings,
     impression: study.impression,
@@ -356,6 +363,25 @@ export default function ReportPanel({
         {/* RITL feedback banner */}
         {pred?.feedback && <FeedbackBanner feedback={pred.feedback} />}
 
+        {/* RITL tab switcher — Original / Revised / Diff */}
+        {hasRitl && (
+          <div className="flex items-center gap-1 bg-bg-elevated rounded-full p-0.5 w-fit">
+            {(["revised", "original", "diff"] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setRitlTab(tab)}
+                className={`px-3 py-1 text-xs rounded-full transition-colors capitalize ${
+                  ritlTab === tab
+                    ? "bg-semantic-orange text-black font-semibold"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        )}
+
 
         {/* Side-by-side: Generated vs GT */}
         {showGroundTruth ? (
@@ -441,8 +467,29 @@ export default function ReportPanel({
           </div>
         ) : (
           <>
-            {/* Single-column generated report */}
-            {parsedPred && (
+            {/* Report display — plain or diff depending on RITL tab */}
+            {hasRitl && ritlTab === "diff" && parsedOrig && parsedRitl ? (
+              <div className="space-y-4">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                  Changes from original
+                  <span className="ml-2 font-normal">
+                    (<span className="text-semantic-red">removed</span>
+                    {" / "}
+                    <span className="text-semantic-green">added</span>)
+                  </span>
+                </div>
+                <ReportDiff
+                  original={parsedOrig.findings}
+                  revised={parsedRitl.findings}
+                  label="Findings"
+                />
+                <ReportDiff
+                  original={parsedOrig.impression}
+                  revised={parsedRitl.impression}
+                  label="Impression"
+                />
+              </div>
+            ) : parsedPred ? (
               <>
                 <ReportSection
                   label="Findings"
@@ -455,7 +502,7 @@ export default function ReportPanel({
                   color="text-text-secondary"
                 />
               </>
-            )}
+            ) : null}
             {!pred && !liveRun && (
               <div className="text-center py-8 space-y-4">
                 <p className="text-sm text-text-tertiary">
@@ -601,37 +648,6 @@ export default function ReportPanel({
           </div>
         )}
 
-        {/* RITL revised result — diff against original */}
-        {liveRun?.ritl_result && (() => {
-          const originalReport = (liveRun.result as Record<string, string>)?.report_pred || "";
-          const revisedReport = (liveRun.ritl_result as Record<string, string>).report_pred || "";
-          const origParsed = parseReport(originalReport);
-          const revParsed = parseReport(revisedReport);
-          return (
-            <div className="border-t border-separator pt-3 space-y-3">
-              <div className="bg-semantic-orange/10 border border-semantic-orange/30 rounded-panel px-3 py-2">
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-semantic-orange">
-                  Revised after feedback
-                </span>
-                <span className="ml-2 text-[10px] text-text-tertiary font-normal">
-                  (<span className="text-semantic-red">removed</span>
-                  {" / "}
-                  <span className="text-semantic-green">added</span>)
-                </span>
-              </div>
-              <ReportDiff
-                original={origParsed.findings}
-                revised={revParsed.findings}
-                label="Findings"
-              />
-              <ReportDiff
-                original={origParsed.impression}
-                revised={revParsed.impression}
-                label="Impression"
-              />
-            </div>
-          );
-        })()}
       </div>
     </div>
   );
