@@ -10,6 +10,8 @@ Test 5 new capabilities one at a time against the `config_initial.yaml` baseline
 
 ## Features
 
+Features 4 and 5 correspond to the reporting input diagram in `figures/reporting.png`: multiview images (frontal + lateral) and clinical context (demographics, indication, comparison).
+
 | # | Feature | What changes | Servers needed |
 |---|---------|-------------|----------------|
 | 5 | Clinical metadata | Pass age/sex/indication/comparison to agent in initial mode | None new |
