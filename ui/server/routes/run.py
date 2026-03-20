@@ -474,6 +474,7 @@ async def check_servers():
         "cxr_foundation": "http://localhost:8008/health",
         "chexzero": "http://localhost:8009/health",
         "medgemma": "http://localhost:8010/health",
+        "whisper": "http://localhost:8011/health",
     }
     status = {}
     for name, url in servers.items():

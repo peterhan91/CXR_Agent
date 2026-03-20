@@ -122,3 +122,17 @@ export function checkServers(): Promise<{
 }> {
   return fetchJSON("/servers/health");
 }
+
+// ── Voice transcription (Whisper) ─────────────────────────────────────────────
+
+export async function transcribeAudio(audioBlob: Blob): Promise<string> {
+  const form = new FormData();
+  form.append("audio", audioBlob, "recording.webm");
+  const res = await fetch(`${API_BASE}/transcribe`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Transcription failed: ${await res.text()}`);
+  const data = await res.json();
+  return data.text;
+}

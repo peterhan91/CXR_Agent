@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useStudyStore } from "@/stores/studyStore";
 import type { Prediction, TestStudy } from "@/lib/types";
-import { startRun, pollRun, submitFeedback } from "@/lib/api";
+import { startRun, pollRun, submitFeedback, transcribeAudio } from "@/lib/api";
 import type { RunStatus } from "@/lib/api";
 import ReportDiff from "./ReportDiff";
 
@@ -160,6 +160,40 @@ function parseReport(report: string) {
   return { findings: report.trim(), impression: "" };
 }
 
+function HuggingFaceLogo({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="60" cy="60" r="60" fill="#FFD21E" />
+      <path d="M39.5 63C39.5 58.8579 42.8579 55.5 47 55.5C51.1421 55.5 54.5 58.8579 54.5 63" stroke="#1A1A2E" strokeWidth="4.5" strokeLinecap="round" />
+      <path d="M65.5 63C65.5 58.8579 68.8579 55.5 73 55.5C77.1421 55.5 80.5 58.8579 80.5 63" stroke="#1A1A2E" strokeWidth="4.5" strokeLinecap="round" />
+      <circle cx="46" cy="50" r="4" fill="#1A1A2E" />
+      <circle cx="74" cy="50" r="4" fill="#1A1A2E" />
+      <path d="M40 78C40 78 48 88 60 88C72 88 80 78 80 78" stroke="#1A1A2E" strokeWidth="4.5" strokeLinecap="round" />
+      <ellipse cx="30" cy="68" rx="8" ry="5" fill="#FF9D00" opacity="0.5" />
+      <ellipse cx="90" cy="68" rx="8" ry="5" fill="#FF9D00" opacity="0.5" />
+    </svg>
+  );
+}
+
+function MicIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="1" width="6" height="12" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+    </svg>
+  );
+}
+
+function StopIcon({ className = "w-4 h-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
 // Map model selector IDs to run modes
 const MODEL_TO_RUN_MODE: Record<string, string> = {
   agent_initial: "agent",
@@ -185,6 +219,49 @@ export default function ReportPanel({
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
   const [ritlTab, setRitlTab] = useState<"revised" | "original" | "diff">("revised");
   const pollRefs = useRef<Record<string, NodeJS.Timeout>>({});
+
+  // Voice input state
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType });
+        if (blob.size === 0) return;
+        setIsTranscribing(true);
+        try {
+          const text = await transcribeAudio(blob);
+          if (text) setFeedback((prev) => (prev ? prev + " " + text : text));
+        } catch (e) {
+          console.error("Transcription error:", e);
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+    } catch (e) {
+      console.error("Microphone access denied:", e);
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }, []);
 
   useEffect(() => {
     return () => { Object.values(pollRefs.current).forEach(clearInterval); };
@@ -621,27 +698,57 @@ export default function ReportPanel({
               </button>
             ) : (
               <div className="space-y-2">
-                <textarea
-                  value={feedback}
-                  onChange={(e) => setFeedback(e.target.value)}
-                  placeholder="e.g. I don't see effusion — re-examine the costophrenic angles"
-                  className="w-full bg-bg-surface border border-separator rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-semantic-orange resize-none"
-                  rows={3}
-                />
-                <div className="flex gap-2">
+                <div className="relative">
+                  <textarea
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                    placeholder="e.g. I don't see effusion — re-examine the costophrenic angles"
+                    className="w-full bg-bg-surface border border-separator rounded-lg px-3 py-2 pr-12 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-semantic-orange resize-none"
+                    rows={3}
+                  />
+                  {/* Mic button */}
                   <button
-                    onClick={handleFeedback}
-                    disabled={!feedback.trim()}
-                    className="px-4 py-1 text-xs font-semibold rounded-full bg-semantic-orange text-black hover:bg-semantic-orange/80 disabled:opacity-50"
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={isTranscribing}
+                    title={isRecording ? "Stop recording" : "Voice input (Whisper)"}
+                    className={`absolute right-2 bottom-2 p-1.5 rounded-full transition-all ${
+                      isRecording
+                        ? "bg-red-500 text-white animate-pulse"
+                        : isTranscribing
+                          ? "bg-bg-elevated text-text-tertiary"
+                          : "bg-bg-elevated text-text-secondary hover:text-text-primary hover:bg-bg-surface"
+                    }`}
                   >
-                    Submit & Re-run
+                    {isTranscribing ? (
+                      <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    ) : isRecording ? (
+                      <StopIcon className="w-4 h-4" />
+                    ) : (
+                      <MicIcon className="w-4 h-4" />
+                    )}
                   </button>
-                  <button
-                    onClick={() => { setShowFeedbackInput(false); setFeedback(""); }}
-                    className="px-3 py-1 text-xs rounded-full bg-bg-elevated text-text-secondary"
-                  >
-                    Cancel
-                  </button>
+                </div>
+                {/* HF Whisper attribution */}
+                <div className="flex items-center justify-between">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleFeedback}
+                      disabled={!feedback.trim()}
+                      className="px-4 py-1 text-xs font-semibold rounded-full bg-semantic-orange text-black hover:bg-semantic-orange/80 disabled:opacity-50"
+                    >
+                      Submit & Re-run
+                    </button>
+                    <button
+                      onClick={() => { setShowFeedbackInput(false); setFeedback(""); }}
+                      className="px-3 py-1 text-xs rounded-full bg-bg-elevated text-text-secondary"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1 text-[10px] text-text-tertiary" title="Voice powered by Whisper large-v3-turbo">
+                    <HuggingFaceLogo className="w-3.5 h-3.5" />
+                    <span>Whisper</span>
+                  </div>
                 </div>
               </div>
             )}

@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse
 
 from routes.results import router as results_router
 from routes.run import router as run_router
+from routes.transcribe import router as transcribe_router
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RESULTS_DIR = PROJECT_ROOT / "results" / "eval_v4"
@@ -43,6 +44,7 @@ app.add_middleware(
 
 app.include_router(results_router, prefix="/api")
 app.include_router(run_router, prefix="/api")
+app.include_router(transcribe_router, prefix="/api")
 
 
 @app.get("/api/image")

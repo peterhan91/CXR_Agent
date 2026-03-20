@@ -41,6 +41,7 @@ if [ "$1" = "--stop" ]; then
     pkill -f "biomedparse_server" 2>/dev/null || true
     pkill -f "medsam3_server" 2>/dev/null || true
     pkill -f "factchexcker_server" 2>/dev/null || true
+    pkill -f "whisper_server" 2>/dev/null || true
     echo "All servers stopped."
     exit 0
 fi
@@ -118,6 +119,13 @@ CUDA_VISIBLE_DEVICES=2 "${MAIN_PYTHON}" "${REPO_ROOT}/servers/factchexcker_serve
     > "${LOG_DIR}/factchexcker.log" 2>&1 &
 echo "  PID: $!"
 
+# --- GPU 1: Whisper (voice input for RITL) ---
+echo "[GPU 1] Starting Whisper server on :8011 (voice transcription, torch.compile)..."
+CUDA_VISIBLE_DEVICES=1 "${MAIN_PYTHON}" "${REPO_ROOT}/servers/whisper_server.py" \
+    --port 8011 \
+    > "${LOG_DIR}/whisper.log" 2>&1 &
+echo "  PID: $!"
+
 echo ""
 echo "=== All servers launching ==="
 echo "Monitor logs: tail -f ${LOG_DIR}/*.log"
@@ -128,5 +136,6 @@ echo "  curl http://localhost:8004/health  # MedVersa (multi-task)"
 echo "  curl http://localhost:8005/health  # BiomedParse"
 echo "  curl http://localhost:8006/health  # MedSAM3"
 echo "  curl http://localhost:8007/health  # FactCheXcker"
+echo "  curl http://localhost:8011/health  # Whisper (voice input)"
 echo ""
 echo "Stop all: bash scripts/launch_servers.sh --stop"
