@@ -94,9 +94,8 @@ function parseReport(report: string) {
 
   for (const line of lines) {
     const stripped = line.replace(/\*/g, "").trim().toLowerCase();
-    // Findings headers: "Key Findings:", "Key findings include:", "Chest X-ray findings:", "Report:", etc.
-    if (/^(key\s+|chest\s+x-?ray\s+)?findings\s*(include)?:?$/.test(stripped) ||
-        /^report:?$/.test(stripped) ||
+    // Findings headers: "Key Findings:", "Key findings include:", "...shows several findings:", etc.
+    if (/^(key\s+)?findings\s*(include)?:?$/.test(stripped) ||
         /shows\s+several\s+(key\s+|notable\s+)?findings:?$/.test(stripped)) {
       currentSection = "findings";
       continue;
@@ -125,10 +124,8 @@ function parseReport(report: string) {
   }
 
   if (sections["findings"] || sections["impression"]) {
-    // If no explicit findings header, treat preamble as findings
-    const findingsLines = sections["findings"] || sections["preamble"] || [];
     return {
-      findings: stripMarkdown(findingsLines.join("\n")),
+      findings: stripMarkdown((sections["findings"] || []).join("\n")),
       impression: stripMarkdown((sections["impression"] || []).join("\n")),
     };
   }
