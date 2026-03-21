@@ -180,6 +180,7 @@ export default function ReportPanel({
   // Run state — from store (shared with WorkflowPanel)
   const liveRuns = useStudyStore((s) => s.liveRuns);
   const setLiveRun = useStudyStore((s) => s.setLiveRun);
+  const updateLiveRun = useStudyStore((s) => s.updateLiveRun);
   const [feedback, setFeedback] = useState("");
   const [showFeedbackInput, setShowFeedbackInput] = useState(false);
   const [ritlTab, setRitlTab] = useState<"revised" | "original" | "diff">("revised");
@@ -240,7 +241,10 @@ export default function ReportPanel({
     }
     try {
       const modelKey = liveRuns["agent_initial"] ? "agent_initial" : "agent_initial_guided";
-      await submitFeedback(agentRun.run_id, feedback.trim());
+      const feedbackText = feedback.trim();
+      await submitFeedback(agentRun.run_id, feedbackText);
+      // Store feedback text on the run so trajectory panel can show it during streaming
+      updateLiveRun(modelKey, { _pendingFeedback: feedbackText } as Partial<RunStatus>);
       setShowFeedbackInput(false);
       setFeedback("");
       setRitlTab("revised");

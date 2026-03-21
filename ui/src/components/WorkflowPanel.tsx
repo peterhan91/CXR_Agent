@@ -200,8 +200,11 @@ function StepList({
 
       {steps.map((step, i) => (
         <div key={i} className={isLive && i >= prevCount.current - 1 ? "animate-step-pop-in" : ""}>
-          {i === feedbackIdx && feedback && (
-            <FeedbackDivider feedback={feedback} />
+          {i === feedbackIdx && (
+            <>
+              <FeatureBanner color="border-semantic-orange bg-semantic-orange/8 text-semantic-orange" label="Feedback received — agent re-reasoning" />
+              {feedback && <FeedbackDivider feedback={feedback} />}
+            </>
           )}
           <StepCard
             step={step}
@@ -249,7 +252,10 @@ export default function WorkflowPanel({ trajectories, featureContext, lateralIma
   const precomputedTraj = trajectories[trajectoryKey];
 
   const traj = liveTraj || precomputedTraj;
-  const isLive = !!liveTraj && (liveRun?.status === "running" || liveRun?.status === "queued");
+  const hasPendingFeedback = !!(liveRun as unknown as Record<string, unknown> | null)?._pendingFeedback;
+  const isLiveInitial = !!liveTraj && (liveRun?.status === "running" || liveRun?.status === "queued");
+  const isLiveRitl = !!(liveRun?.status === "running" && hasPendingFeedback);
+  const isLive = isLiveInitial || isLiveRitl;
 
   if (!traj) {
     const isRunning = liveRun?.status === "queued" || liveRun?.status === "running";
@@ -274,7 +280,7 @@ export default function WorkflowPanel({ trajectories, featureContext, lateralIma
   const filteredRitlSteps = ritlSteps.filter((s) => s.type === "tool_call" && s.tool_name);
   const ritlFeedback = liveRun?.ritl_result
     ? (liveRun.ritl_result as Record<string, string>).feedback
-    : null;
+    : (liveRun as unknown as Record<string, unknown> | null)?._pendingFeedback as string | null;
 
   const steps = filteredRitlSteps.length > 0
     ? [...baseSteps, ...filteredRitlSteps]
@@ -283,7 +289,7 @@ export default function WorkflowPanel({ trajectories, featureContext, lateralIma
   // Feedback boundary: either from pre-computed traj or from live RITL
   let feedbackIdx = traj.feedback ? findFeedbackBoundary(baseSteps) : -1;
   const feedbackText = traj.feedback || ritlFeedback || undefined;
-  if (feedbackIdx < 0 && filteredRitlSteps.length > 0) {
+  if (feedbackIdx < 0 && (filteredRitlSteps.length > 0 || ritlFeedback)) {
     feedbackIdx = baseSteps.length; // boundary is where RITL steps begin
   }
 

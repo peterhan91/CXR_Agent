@@ -337,11 +337,22 @@ def _run_ritl_feedback_background(run_id: str, feedback: str):
         agent = _get_agent()
         t0 = time.time()
 
+        # Monkey-patch to capture live trajectory for streaming
+        original_react_loop = agent._react_loop
+
+        def _patched_react_loop(messages, system_prompt, traj, max_iters, **kwargs):
+            run["_live_ritl_trajectory"] = traj
+            return original_react_loop(messages, system_prompt, traj, max_iters, **kwargs)
+
+        agent._react_loop = _patched_react_loop
+
         trajectory = agent.continue_with_feedback(
             messages=parent_messages,
             system_prompt=parent_system,
             feedback=feedback,
         )
+
+        agent._react_loop = original_react_loop
 
         wall_time = (time.time() - t0) * 1000
 
@@ -380,6 +391,7 @@ def _run_ritl_feedback_background(run_id: str, feedback: str):
             "wall_time_ms": wall_time,
         }
         run["ritl_trajectory_steps"] = all_ritl_steps
+        run.pop("_live_ritl_trajectory", None)
         run["status"] = "complete"
         run["message"] = f"RITL revision complete (round {round_num})"
 
@@ -465,6 +477,27 @@ async def get_run(run_id: str):
             }
             run["message"] = f"Running... ({len(live_steps)} tool calls)"
 
+    # Build live RITL steps if feedback re-reasoning is in progress
+    ritl_steps = run.get("ritl_trajectory_steps")
+    if not ritl_steps and run.get("_live_ritl_trajectory"):
+        live_ritl = run["_live_ritl_trajectory"]
+        live_ritl_steps = []
+        for s in live_ritl.steps:
+            if not isinstance(s, dict) or s.get("type") != "tool_call":
+                continue
+            live_ritl_steps.append({
+                "iteration": s.get("iteration", 0),
+                "type": "tool_call",
+                "tool_name": s.get("tool_name", ""),
+                "tool_input": s.get("tool_input", {}),
+                "tool_output": s.get("tool_output", ""),
+                "duration_ms": s.get("duration_ms", 0),
+                "parallel_count": s.get("parallel_count", 1),
+            })
+        if live_ritl_steps:
+            ritl_steps = live_ritl_steps
+            run["message"] = f"Re-reasoning... ({len(live_ritl_steps)} tool calls)"
+
     return {
         "run_id": run["run_id"],
         "study_id": run["study_id"],
@@ -474,7 +507,7 @@ async def get_run(run_id: str):
         "result": run.get("result"),
         "trajectory": trajectory,
         "ritl_result": run.get("ritl_result"),
-        "ritl_trajectory_steps": run.get("ritl_trajectory_steps"),
+        "ritl_trajectory_steps": ritl_steps,
         "elapsed_ms": (time.time() - run["started_at"]) * 1000,
     }
 
