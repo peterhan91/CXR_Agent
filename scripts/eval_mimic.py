@@ -643,11 +643,16 @@ def run_agent_eval(args):
     errors = 0
     t_start = time.time()
 
+    from tqdm import tqdm
+    pbar = tqdm(total=total, initial=len(existing), desc="Agent eval", unit="study",
+                bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]")
+
     for i, entry in enumerate(test_set):
         study_id = entry["study_id"]
         if study_id in existing:
             continue
 
+        pbar.set_postfix_str(f"{study_id}", refresh=True)
         logger.info(f"[{i+1}/{total}] Agent: study {study_id}")
         t0 = time.time()
 
@@ -664,24 +669,54 @@ def run_agent_eval(args):
                 entry["image_path"], top_k=top_k, template=prior_template,
             )
 
-        # Build optional prior context
+        # Build optional prior context — gated by config feature flags
+        # If "features" key is absent, default all to True (backward compatible)
+        features_cfg = config.get("features")
+        if features_cfg is None:
+            pass_prior = pass_metadata = pass_lateral = True
+        else:
+            pass_prior = features_cfg.get("prior", False)
+            pass_metadata = features_cfg.get("metadata", False)
+            pass_lateral = features_cfg.get("lateral", False)
+
         prior_report = ""
         prior_image_path = ""
         clinical_context = ""
 
         # Source 1: prior_study embedded in the entry (from prepare_eval_datasets.py)
-        prior_study = entry.get("prior_study")
-        if prior_study and isinstance(prior_study, dict):
-            prior_report = prior_study.get("report", "")
-            prior_image_path = prior_study.get("image_path", "")
+        if pass_prior:
+            prior_study = entry.get("prior_study")
+            if prior_study and isinstance(prior_study, dict):
+                prior_report = prior_study.get("report", "")
+                prior_image_path = prior_study.get("image_path", "")
 
-        # Source 2: enriched data (from prepare_mimic_studies.py) — overrides if available
+        # Source 2: entry-level metadata (from prepare_eval_datasets.py / sample_feature_eval.py)
+        if pass_metadata:
+            meta = entry.get("metadata", {})
+            ctx_parts = []
+            age = meta.get("age")
+            sex = meta.get("sex")
+            if age is not None and sex:
+                ctx_parts.append(f"Patient: {age} year old {'male' if sex in ('M', 'Male') else 'female' if sex in ('F', 'Female') else sex}")
+            indication = (meta.get("indication") or "").strip()
+            if indication:
+                ctx_parts.append(f"Indication: {indication}")
+            comparison = (meta.get("comparison") or "").strip()
+            if comparison:
+                ctx_parts.append(f"Comparison: {comparison}")
+            if ctx_parts:
+                clinical_context = "\n".join(ctx_parts)
+
+        # Source 3: enriched data (from prepare_mimic_studies.py) — overrides if available
         enriched = enriched_lookup.get(study_id)
         if enriched:
-            if args.use_prior:
+            if pass_prior and args.use_prior:
                 prior_report, prior_image_path = _get_most_recent_prior(enriched)
-            if args.use_clinical_context and enriched.get("admission_info"):
+            if pass_metadata and args.use_clinical_context and enriched.get("admission_info"):
                 clinical_context = _build_clinical_context(enriched["admission_info"])
+
+        # Lateral image — gated by config
+        lateral_image_path = entry.get("lateral_image_path", "") if pass_lateral else ""
 
         try:
             trajectory = agent.run(
@@ -691,6 +726,7 @@ def run_agent_eval(args):
                 prior_report=prior_report,
                 prior_image_path=prior_image_path,
                 clinical_context=clinical_context,
+                lateral_image_path=lateral_image_path,
             )
             report = trajectory.final_report
             in_tok = trajectory.total_input_tokens
@@ -742,6 +778,8 @@ def run_agent_eval(args):
         with open(trajectories_path, "a") as f:
             f.write(json.dumps(traj_record) + "\n")
 
+        pbar.update(1)
+
         # Save every 5 studies
         if len(predictions) % 5 == 0:
             _save_predictions(predictions_path, predictions)
@@ -753,6 +791,7 @@ def run_agent_eval(args):
                 f"{elapsed/60:.1f}min elapsed"
             )
 
+    pbar.close()
     _save_predictions(predictions_path, predictions)
 
     # Build and save tool usage summary
@@ -1425,11 +1464,14 @@ def _build_tools(config: dict, prompt_mode: str = "current") -> list:
         CheXagent2GroundingTool,
         CheXagent2ClassifyTool,
         CheXagent2VQATool,
+        CheXagent2TemporalTool,
         CheXOneReportTool,
         CheXzeroClassifyTool,
         CXRFoundationClassifyTool,
         MedGemmaVQATool,
         MedGemmaReportTool,
+        MedGemmaGroundingTool,
+        MedGemmaLongitudinalTool,
         MedVersaReportTool,
         MedVersaClassifyTool,
         MedVersaDetectTool,
@@ -1448,9 +1490,12 @@ def _build_tools(config: dict, prompt_mode: str = "current") -> list:
         "chexagent2_classify": CheXagent2ClassifyTool,
         "chexagent2_grounding": CheXagent2GroundingTool,
         "chexagent2_vqa": CheXagent2VQATool,
+        "chexagent2_temporal": CheXagent2TemporalTool,
         "chexone": CheXOneReportTool,
         "medgemma_vqa": MedGemmaVQATool,
         "medgemma_report": MedGemmaReportTool,
+        "medgemma_grounding": MedGemmaGroundingTool,
+        "medgemma_longitudinal": MedGemmaLongitudinalTool,
         "chexzero": CheXzeroClassifyTool,
         "cxr_foundation": CXRFoundationClassifyTool,
         "medversa": MedVersaReportTool,

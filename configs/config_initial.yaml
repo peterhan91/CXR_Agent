@@ -2,6 +2,12 @@
 # Reproduces the original agent behavior from commit e498916.
 # Original 14 tools, original prompts, max 10 iterations, top-20 CLEAR concepts.
 
+# Feature flags — gate what context is passed to the agent
+features:
+  prior: false
+  metadata: false
+  lateral: false
+
 agent:
   model: "claude-sonnet-4-6"
   prompt_mode: "initial"

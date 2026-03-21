@@ -225,6 +225,7 @@ class CXRReActAgent:
         prior_report: str = "",
         prior_image_path: str = "",
         clinical_context: str = "",
+        lateral_image_path: str = "",
     ) -> AgentTrajectory:
         """
         Run the ReAct agent to generate a CXR report.
@@ -265,6 +266,7 @@ class CXRReActAgent:
                     prior_report=prior_report,
                     prior_image_path=prior_image_path,
                     clinical_context=clinical_context,
+                    lateral_image_path=lateral_image_path,
                 ),
             }
         ]
@@ -576,6 +578,7 @@ class CXRReActAgent:
         prior_report: str = "",
         prior_image_path: str = "",
         clinical_context: str = "",
+        lateral_image_path: str = "",
     ) -> list:
         """Build the initial user message with CXR image and instructions.
 
@@ -597,9 +600,30 @@ class CXRReActAgent:
             # will hallucinate findings from visual interpretation. Only the
             # specialized tools should see the image.
             content = []  # discard any image block added above
+            text_parts = [
+                f"{INITIAL_USER_MESSAGE}\n\nThe image file path for tool calls is: {image_path}",
+            ]
+
+            # Clinical context (age, sex, indication, comparison)
+            if clinical_context:
+                text_parts.append(f"\nCLINICAL CONTEXT:\n{clinical_context}")
+
+            # Prior study (report text + image path for temporal tools)
+            if prior_report:
+                prior_section = f"\nPRIOR STUDY REPORT:\n{prior_report}"
+                if prior_image_path:
+                    prior_section += (
+                        f"\n\nPrior study image path: {prior_image_path}"
+                    )
+                text_parts.append(prior_section)
+
+            # Lateral view (for multi-view report generation)
+            if lateral_image_path:
+                text_parts.append(f"\nLateral view image path: {lateral_image_path}")
+
             content.append({
                 "type": "text",
-                "text": f"{INITIAL_USER_MESSAGE}\n\nThe image file path for tool calls is: {image_path}",
+                "text": "\n".join(text_parts),
             })
             return content
 
@@ -621,6 +645,10 @@ class CXRReActAgent:
                     f"\n\nPrior study image path: {prior_image_path}"
                 )
             text_parts.append(prior_section)
+
+        # Lateral view (for multi-view report generation)
+        if lateral_image_path:
+            text_parts.append(f"\nLateral view image path: {lateral_image_path}")
 
         content.append({
             "type": "text",
