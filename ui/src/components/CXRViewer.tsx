@@ -103,8 +103,8 @@ export default function CXRViewer({
               }}
               className={`px-3 py-1.5 text-xs font-medium transition-colors border-b-2 ${
                 activeImageTab === tab.key
-                  ? "text-text-primary border-text-primary"
-                  : "text-text-tertiary border-transparent hover:text-text-secondary"
+                  ? "text-white border-white"
+                  : "text-white/50 border-transparent hover:text-white/80"
               }`}
             >
               {tab.label}
