@@ -67,7 +67,7 @@ function FeedbackDivider({ feedback }: { feedback: string }) {
     <div className="my-3 mx-1">
       <div className="flex items-center gap-2 mb-2">
         <div className="flex-1 h-px bg-semantic-orange/40" />
-        <span className="text-[10px] text-semantic-orange font-semibold uppercase tracking-wider px-2">
+        <span className="text-xs text-semantic-orange font-semibold uppercase tracking-wider px-2">
           Feedback Injected
         </span>
         <div className="flex-1 h-px bg-semantic-orange/40" />
@@ -100,7 +100,7 @@ function StepCard({
       }`}>
         {/* Icon */}
         <span
-          className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold bg-bg-elevated flex-shrink-0 mt-0.5 ${toolColor(
+          className={`w-5 h-5 rounded flex items-center justify-center text-xs font-bold bg-bg-elevated flex-shrink-0 mt-0.5 ${toolColor(
             step.tool_name
           )}`}
         >
@@ -114,11 +114,11 @@ function StepCard({
               {step.tool_name}
             </span>
             {step.parallel_count && step.parallel_count > 1 && (
-              <span className="text-[10px] text-text-tertiary">
+              <span className="text-xs text-text-tertiary">
                 +{step.parallel_count - 1} parallel
               </span>
             )}
-            <span className="text-[10px] text-text-tertiary ml-auto flex-shrink-0">
+            <span className="text-xs text-text-tertiary ml-auto flex-shrink-0">
               {step.duration_ms > 0
                 ? `${(step.duration_ms / 1000).toFixed(1)}s`
                 : "cached"}
@@ -140,7 +140,7 @@ function StepCard({
 function FeatureBanner({ color, label }: { color: string; label: string }) {
   return (
     <div className={`flex items-center gap-2 mx-1 my-1.5 px-2.5 py-1 rounded border-l-2 ${color}`}>
-      <span className="text-[10px] font-medium">{label}</span>
+      <span className="text-xs font-medium">{label}</span>
     </div>
   );
 }
@@ -148,7 +148,7 @@ function FeatureBanner({ color, label }: { color: string; label: string }) {
 /** Inline marker after specific tool calls */
 function InlineMarker({ label, color }: { label: string; color: string }) {
   return (
-    <div className={`flex items-center gap-1.5 mx-3 my-0.5 text-[10px] ${color}`}>
+    <div className={`flex items-center gap-1.5 mx-3 my-0.5 text-xs ${color}`}>
       <span className="w-1 h-1 rounded-full bg-current" />
       <span className="font-medium">{label}</span>
     </div>
@@ -229,7 +229,7 @@ function StepList({
         </div>
       ))}
       {isLive && (
-        <div className="flex items-center gap-2 py-2 px-2 text-[10px] text-semantic-orange animate-pulse">
+        <div className="flex items-center gap-2 py-2 px-2 text-xs text-semantic-orange animate-pulse">
           <span className="w-2 h-2 border border-semantic-orange border-t-transparent rounded-full animate-spin" />
           Waiting for next tool call...
         </div>
@@ -308,13 +308,13 @@ export default function WorkflowPanel({ trajectories, featureContext, lateralIma
             </span>
           )}
         </h2>
-        <div className="flex gap-3 mt-1 text-[10px] text-text-tertiary">
+        <div className="flex gap-3 mt-1 text-xs text-text-tertiary">
           <span>{steps.length} tool calls</span>
           <span>{totalTime.toFixed(1)}s</span>
           <span>{traj.input_tokens?.toLocaleString()} tokens in</span>
         </div>
         {feedbackIdx >= 0 && (
-          <div className="flex gap-2 mt-1.5 text-[10px]">
+          <div className="flex gap-2 mt-1.5 text-xs">
             <span className="text-text-tertiary">{feedbackIdx} pre-feedback</span>
             <span className="text-semantic-orange">{steps.length - feedbackIdx} post-feedback</span>
           </div>
@@ -334,7 +334,7 @@ export default function WorkflowPanel({ trajectories, featureContext, lateralIma
       />
 
       {/* Legend */}
-      <div className="px-4 py-2 border-t border-separator flex flex-wrap gap-3 text-[10px] text-text-tertiary">
+      <div className="px-4 py-2 border-t border-separator flex flex-wrap gap-3 text-xs text-text-tertiary">
         <span className="text-blue-400">R Report</span>
         <span className="text-purple-400">C Classify</span>
         <span className="text-cyan-400">Q VQA</span>

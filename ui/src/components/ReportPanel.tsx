@@ -317,7 +317,7 @@ export default function ReportPanel({
         {ritlModels.length > 0 && (
           <div className="space-y-1.5">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] text-semantic-orange font-semibold uppercase tracking-wider">RITL</span>
+              <span className="text-xs text-semantic-orange font-semibold uppercase tracking-wider">RITL</span>
               {ritlModels.map((m) => (
                 <button
                   key={m}
@@ -341,7 +341,7 @@ export default function ReportPanel({
             )}
           </div>
         )}
-        <div className="flex gap-3 text-[10px]">
+        <div className="flex gap-3 text-xs">
           <button
             onClick={toggleGroundTruth}
             className={`uppercase tracking-wider transition-colors ${
@@ -391,10 +391,10 @@ export default function ReportPanel({
           <div className="space-y-4">
             {/* Column headers */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+              <div className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
                 Generated
               </div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-semantic-green">
+              <div className="text-xs font-semibold uppercase tracking-wider text-semantic-green">
                 Ground Truth
               </div>
             </div>
@@ -449,7 +449,7 @@ export default function ReportPanel({
         ) : isRITL && parsedBase && parsedPred ? (
           /* Diff view: original → revised for RITL */
           <div className="space-y-4">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+            <div className="text-xs font-semibold uppercase tracking-wider text-text-tertiary">
               Changes from original
               <span className="ml-2 font-normal">
                 (<span className="text-semantic-red">removed</span>
@@ -473,7 +473,7 @@ export default function ReportPanel({
             {/* Report display — plain or diff depending on RITL tab */}
             {hasRitl && ritlTab === "diff" && parsedOrig && parsedRitl ? (
               <div className="space-y-4">
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                <div className="text-xs font-semibold uppercase tracking-wider text-text-tertiary">
                   Changes from original
                   <span className="ml-2 font-normal">
                     (<span className="text-semantic-red">removed</span>
@@ -564,7 +564,7 @@ export default function ReportPanel({
                 <p className="text-sm text-semantic-orange">
                   {liveRun.message}
                 </p>
-                <p className="text-[10px] text-text-tertiary">
+                <p className="text-xs text-text-tertiary">
                   {(liveRun.elapsed_ms / 1000).toFixed(0)}s elapsed
                 </p>
               </div>
@@ -597,7 +597,7 @@ export default function ReportPanel({
 
         {/* Stats */}
         {pred && (
-          <div className="border-t border-separator pt-3 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-text-tertiary">
+          <div className="border-t border-separator pt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-tertiary">
             {pred.num_steps != null && <span>{pred.num_steps} steps</span>}
             {pred.wall_time_ms != null && (
               <span>{(pred.wall_time_ms / 1000).toFixed(1)}s</span>

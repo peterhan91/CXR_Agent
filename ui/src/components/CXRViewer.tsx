@@ -140,7 +140,7 @@ export default function CXRViewer({
 
       {/* Controls bar */}
       <div className="bg-bg-surface border-t border-separator px-3 py-2">
-        <div className="flex items-center gap-3 text-[11px] text-text-secondary">
+        <div className="flex items-center gap-3 text-xs text-text-secondary">
           <label className="flex items-center gap-1.5">
             <span>Brightness</span>
             <input

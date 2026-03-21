@@ -77,13 +77,13 @@ export default function StudyViewerPage() {
         <h1 className="text-sm font-semibold text-text-primary">
           {study.study_id}
         </h1>
-        <span className="text-[10px] text-text-tertiary">{dataset}</span>
+        <span className="text-xs text-text-tertiary">{dataset}</span>
         {positiveLabels.length > 0 && (
           <div className="flex gap-1 ml-auto">
             {positiveLabels.map((label) => (
               <span
                 key={label}
-                className="px-2 py-0.5 text-[10px] rounded bg-bg-elevated text-text-secondary"
+                className="px-2 py-0.5 text-xs rounded bg-bg-elevated text-text-secondary"
               >
                 {label}
               </span>

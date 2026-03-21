@@ -163,7 +163,7 @@ export default function DashboardPage() {
             No Results
           </button>
         </div>
-        <span className="text-[10px] text-text-tertiary ml-auto">
+        <span className="text-xs text-text-tertiary ml-auto">
           {total.toLocaleString()} studies
           {search && ` matching "${search}"`}
         </span>
@@ -180,7 +180,7 @@ export default function DashboardPage() {
             <div className="rounded-panel border border-separator overflow-hidden">
               <table className="w-full">
                 <thead>
-                  <tr className="bg-bg-surface text-[10px] text-text-tertiary uppercase tracking-wider">
+                  <tr className="bg-bg-surface text-xs text-text-tertiary uppercase tracking-wider">
                     <th className="text-left px-4 py-2 w-1/2">Study ID</th>
                     <th className="text-left px-4 py-2">Dataset</th>
                     <th className="text-center px-4 py-2">Status</th>
@@ -210,7 +210,7 @@ export default function DashboardPage() {
                             .slice(0, 40)}
                         </span>
                         {s.is_followup && (
-                          <span className="ml-2 text-[10px] text-text-tertiary">
+                          <span className="ml-2 text-xs text-text-tertiary">
                             F/U
                           </span>
                         )}
@@ -228,12 +228,12 @@ export default function DashboardPage() {
                         {s.has_results ? (
                           <span className="inline-flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-semantic-green" />
-                            <span className="text-[10px] text-semantic-green">
+                            <span className="text-xs text-semantic-green">
                               Evaluated
                             </span>
                           </span>
                         ) : (
-                          <span className="text-[10px] text-text-tertiary">
+                          <span className="text-xs text-text-tertiary">
                             —
                           </span>
                         )}
