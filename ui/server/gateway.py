@@ -26,11 +26,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 RESULTS_DIR = PROJECT_ROOT / "results" / "eval_v4"
 
 ALLOWED_IMAGE_ROOTS = [
-    "/home/than/physionet.org",
-    "/home/than/Datasets",
-    "/home/than/.cache",
-    "/home/than/DeepLearning/CXR_Agent/data",
-    "/home/than/DeepLearning/CXR_Agent/results",
+    str(PROJECT_ROOT / "data"),
+    str(PROJECT_ROOT / "results"),
+    os.path.expanduser("~/.cache"),
+    os.path.expanduser("~/physionet.org"),
+    os.path.expanduser("~/Datasets"),
 ]
 
 app = FastAPI(title="CXR Agent Gateway", version="0.1.0")
