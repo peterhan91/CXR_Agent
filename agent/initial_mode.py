@@ -140,4 +140,21 @@ INITIAL_TOOL_DESCRIPTIONS = {
         "and corrects them based on the actual image. Only call this when the draft report "
         "contains specific numerical measurements about tubes, lines, or devices."
     ),
+    "medgemma_grounding": (
+        "Visually ground a finding or phrase in a chest X-ray using MedGemma (Google 4B). "
+        "Returns bounding box coordinates [0-1] showing WHERE a finding is located. "
+        "Use alongside or instead of chexagent2_grounding for a second opinion "
+        "on spatial localization of confirmed findings."
+    ),
+    "medgemma_longitudinal": (
+        "Compare current and prior chest X-rays using MedGemma multi-image input. "
+        "Describes interval changes: improved, worsened, or stable findings. "
+        "Only use when a prior study image path is available."
+    ),
+    "chexagent2_temporal": (
+        "Compare current and prior chest X-rays using CheXagent-2 temporal classification. "
+        "Can assess whether a specific disease has improved, worsened, or stabilized, "
+        "or provide open-ended comparison between two studies. "
+        "Only use when a prior study image path is available."
+    ),
 }

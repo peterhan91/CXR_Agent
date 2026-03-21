@@ -311,3 +311,68 @@ class CheXagent2VQATool(BaseCXRTool):
         )
         resp.raise_for_status()
         return f"CheXagent-2 VQA:\n  Q: {question}\n  A: {resp.json()['result']}"
+
+
+class CheXagent2TemporalTool(BaseCXRTool):
+
+    def __init__(self, endpoint: str = "http://localhost:8001"):
+        self.endpoint = endpoint
+
+    @property
+    def name(self) -> str:
+        return "chexagent2_temporal"
+
+    @property
+    def description(self) -> str:
+        return (
+            "[TEMPORAL] "
+            "Compare current and prior chest X-rays using CheXagent-2 temporal classification. "
+            "Two modes: (1) with disease_name — classifies if that disease has improved, worsened, "
+            "or stabilized between the two images; (2) without disease_name — open-ended comparison "
+            "describing changes between the two studies. "
+            "WHEN TO USE: Only when a prior study image path is available. Call this to assess "
+            "temporal change for follow-up reporting. "
+            "EXAMPLE: "
+            "Input: {current_image_path: '...', prior_image_path: '...', disease_name: 'pleural effusion'} → "
+            "'CheXagent-2 Temporal:\n  Disease: pleural effusion\n  Result: improved'"
+        )
+
+    @property
+    def input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "current_image_path": {
+                    "type": "string",
+                    "description": "Path to the current chest X-ray image file.",
+                },
+                "prior_image_path": {
+                    "type": "string",
+                    "description": "Path to the prior chest X-ray image file.",
+                },
+                "disease_name": {
+                    "type": "string",
+                    "description": "Optional: specific disease to assess temporal change for.",
+                },
+            },
+            "required": ["current_image_path", "prior_image_path"],
+        }
+
+    def run(self, current_image_path: str, prior_image_path: str,
+            disease_name: str = None) -> str:
+        resp = requests.post(
+            f"{self.endpoint}/temporal",
+            json={
+                "current_image_path": current_image_path,
+                "prior_image_path": prior_image_path,
+                "disease_name": disease_name,
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        result = resp.json()["result"]
+        lines = ["CheXagent-2 Temporal:"]
+        if disease_name:
+            lines.append(f"  Disease: {disease_name}")
+        lines.append(f"  Result: {result}")
+        return "\n".join(lines)

@@ -7,6 +7,7 @@ from tools.chexagent2 import (
     CheXagent2GroundingTool,
     CheXagent2ClassifyTool,
     CheXagent2VQATool,
+    CheXagent2TemporalTool,
 )
 from tools.chexone import CheXOneReportTool
 from tools.chexzero import CheXzeroClassifyTool
@@ -22,7 +23,12 @@ from tools.biomedparse import BiomedParseSegmentTool
 from tools.medsam import MedSAMSegmentTool
 from tools.medsam3 import MedSAM3SegmentTool
 from tools.factchexcker import FactCheXckerVerifyTool
-from tools.medgemma import MedGemmaVQATool, MedGemmaReportTool
+from tools.medgemma import (
+    MedGemmaVQATool,
+    MedGemmaReportTool,
+    MedGemmaGroundingTool,
+    MedGemmaLongitudinalTool,
+)
 
 __all__ = [
     "BaseCXRTool",
@@ -32,14 +38,17 @@ __all__ = [
     "CheXagent2GroundingTool",
     "CheXagent2ClassifyTool",
     "CheXagent2VQATool",
+    "CheXagent2TemporalTool",
     # CheXOne
     "CheXOneReportTool",
     # Zero-shot classification
     "CheXzeroClassifyTool",
     "CXRFoundationClassifyTool",
-    # MedGemma (VQA + report)
+    # MedGemma (VQA + report + grounding + longitudinal)
     "MedGemmaVQATool",
     "MedGemmaReportTool",
+    "MedGemmaGroundingTool",
+    "MedGemmaLongitudinalTool",
     # MedVersa (multi-task)
     "MedVersaReportTool",
     "MedVersaClassifyTool",

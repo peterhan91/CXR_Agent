@@ -120,6 +120,13 @@ class VQARequest(BaseModel):
     max_new_tokens: int = 512
 
 
+class TemporalRequest(BaseModel):
+    current_image_path: str
+    prior_image_path: str
+    disease_name: Optional[str] = None
+    max_new_tokens: int = 512
+
+
 class TextResponse(BaseModel):
     result: str
     generation_time_ms: float
@@ -491,6 +498,39 @@ async def vqa(req: VQARequest):
     response, gen_time = generate(
         models["base"], models["base_tok"],
         [req.image_path], req.question, req.max_new_tokens,
+    )
+    return TextResponse(result=response, generation_time_ms=gen_time)
+
+
+# --- Temporal comparison endpoint (new) ---
+
+@app.post("/temporal", response_model=TextResponse)
+async def temporal(req: TemporalRequest):
+    """Compare current and prior CXRs for temporal change.
+
+    If disease_name is provided, uses temporal_image_classification task:
+      "Given two images of a patient, where the first is taken before the second,
+       determine if {disease_name} has improved, worsened, or stabilized."
+    Otherwise, open-ended comparison via findings_generation with 2 images.
+
+    Image order: [prior, current] (chronological, as CheXagent-2 expects).
+    """
+    image_paths = [req.prior_image_path, req.current_image_path]
+
+    if req.disease_name:
+        prompt = (
+            f"Given two images of a patient, where the first is taken before the second, "
+            f"determine if {req.disease_name} has improved, worsened, or stabilized."
+        )
+    else:
+        prompt = (
+            "Compare the findings between these two chest X-rays taken at different times. "
+            "Describe what has changed, improved, or worsened."
+        )
+
+    response, gen_time = generate(
+        models["base"], models["base_tok"],
+        image_paths, prompt, req.max_new_tokens,
     )
     return TextResponse(result=response, generation_time_ms=gen_time)
 
