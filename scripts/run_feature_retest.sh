@@ -96,3 +96,11 @@ for feat in features:
     print(f'{feat:<25} {s[\"RadGraph_F1\"]:>12.4f} {s[\"RadCliQ_v1\"]:>10.4f} {s[\"BLEU\"]:>8.4f} {s[\"BERT\"]:>8.4f}')
 print()
 "
+
+# --- Combo Full: all clinical features ---
+echo ""
+echo "╔══════════════════════════════════════════════╗"
+echo "║  Combo Full: all clinical features           ║"
+echo "╚══════════════════════════════════════════════╝"
+echo ""
+run_feature "combo_full" "configs/config_combo_full.yaml"
