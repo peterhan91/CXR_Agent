@@ -299,7 +299,7 @@ export default function WorkflowPanel({ trajectories, featureContext, lateralIma
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="px-4 pt-4 pb-2 border-b border-separator">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-text-secondary flex items-center gap-2">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-white flex items-center gap-2">
           Agent Trajectory
           {isLive && (
             <span className="inline-flex items-center gap-1 text-semantic-orange font-normal normal-case tracking-normal">

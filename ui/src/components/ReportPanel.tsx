@@ -345,7 +345,7 @@ export default function ReportPanel({
           <button
             onClick={toggleGroundTruth}
             className={`uppercase tracking-wider transition-colors ${
-              showGroundTruth ? "text-semantic-green" : "text-text-tertiary hover:text-text-secondary"
+              showGroundTruth ? "text-semantic-green" : "text-white/70 hover:text-white"
             }`}
           >
             {showGroundTruth ? "Hide" : "Show"} Ground Truth
@@ -353,7 +353,7 @@ export default function ReportPanel({
           {MODEL_TO_RUN_MODE[selectedModel] && (pred || liveRun?.status === "complete") && (
             <button
               onClick={() => handleRunMode(selectedModel)}
-              className="px-3 py-1 text-[10px] rounded-full bg-bg-elevated text-text-primary hover:text-white transition-colors"
+              className="px-4 py-1.5 text-xs rounded-full bg-bg-elevated text-white hover:bg-bg-elevated/80 transition-colors"
             >
               Re-run
             </button>
