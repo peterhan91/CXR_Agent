@@ -13,6 +13,9 @@ interface StudyViewState {
   selectedModel: string;
   showGroundTruth: boolean;
 
+  // Image viewer tab
+  activeImageTab: "current" | "prior" | "lateral";
+
   // Trajectory
   expandedSteps: Set<number>;
 
@@ -25,6 +28,7 @@ interface StudyViewState {
   setZoom: (v: number) => void;
   setPan: (x: number, y: number) => void;
   resetView: () => void;
+  setActiveImageTab: (tab: "current" | "prior" | "lateral") => void;
   setSelectedModel: (m: string) => void;
   toggleGroundTruth: () => void;
   toggleStep: (i: number) => void;
@@ -39,6 +43,7 @@ export const useStudyStore = create<StudyViewState>((set) => ({
   zoom: 1,
   panX: 0,
   panY: 0,
+  activeImageTab: "current",
   selectedModel: "agent_initial",
   showGroundTruth: false,
   expandedSteps: new Set(),
@@ -50,6 +55,7 @@ export const useStudyStore = create<StudyViewState>((set) => ({
   setPan: (x, y) => set({ panX: x, panY: y }),
   resetView: () =>
     set({ brightness: 100, contrast: 100, zoom: 1, panX: 0, panY: 0 }),
+  setActiveImageTab: (tab) => set({ activeImageTab: tab }),
   setSelectedModel: (m) => set({ selectedModel: m }),
   toggleGroundTruth: () =>
     set((s) => ({ showGroundTruth: !s.showGroundTruth })),
@@ -76,6 +82,7 @@ export const useStudyStore = create<StudyViewState>((set) => ({
       zoom: 1,
       panX: 0,
       panY: 0,
+      activeImageTab: "current",
       selectedModel: "agent_initial",
       showGroundTruth: false,
       expandedSteps: new Set(),

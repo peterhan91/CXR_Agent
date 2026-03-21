@@ -29,7 +29,7 @@ _runs: dict[str, dict] = {}
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-INITIAL_CONFIG_PATH = PROJECT_ROOT / "configs" / "config_initial.yaml"
+INITIAL_CONFIG_PATH = PROJECT_ROOT / "configs" / "config_combo_full.yaml"
 TEST_SET_PATH = PROJECT_ROOT / "results" / "eval_v4" / "test_set.json"
 
 # Baseline server endpoints
@@ -37,7 +37,6 @@ BASELINE_ENDPOINTS = {
     "chexagent2": {"url": "http://localhost:8001/generate_report", "payload_key": "image_path"},
     "chexone": {"url": "http://localhost:8002/generate_report", "payload_key": "image_path"},
     "medgemma": {"url": "http://localhost:8010/generate_report", "payload_key": "image_path"},
-    "medversa": {"url": "http://localhost:8004/generate_report", "payload_key": "image_path"},
 }
 
 # Lazy-loaded agent components
@@ -106,7 +105,7 @@ def _get_agent():
 
 class RunRequest(BaseModel):
     study_id: str
-    mode: str = "agent"  # "agent", "agent_guided", "chexagent2", "chexone", "medgemma", "medversa"
+    mode: str = "agent"  # "agent", "agent_guided", "chexagent2", "chexone", "medgemma"
 
 
 class FeedbackRequest(BaseModel):
@@ -124,11 +123,39 @@ def _run_agent_background(run_id: str, study: dict, guided: bool = False):
 
         agent = _get_agent()
         image_path = study["image_path"]
+
+        # Prior study context (temporal comparison)
         prior_report = ""
         prior_image_path = ""
         if study.get("prior_study"):
             prior_report = study["prior_study"].get("report", "")
             prior_image_path = study["prior_study"].get("image_path", "")
+
+        # Clinical metadata context
+        # NOTE: Only reads metadata fields — NEVER reads report_gt, findings, or impression
+        clinical_context = ""
+        meta = study.get("metadata") or {}
+        ctx_parts = []
+        age = meta.get("age") or (
+            (meta.get("admission_info") or {}).get("demographics", {}).get("age")
+        )
+        sex = meta.get("sex") or (
+            (meta.get("admission_info") or {}).get("demographics", {}).get("gender")
+        )
+        if age is not None and sex:
+            sex_word = "male" if str(sex).upper() in ("M", "MALE") else "female"
+            ctx_parts.append(f"Patient: {age} year old {sex_word}")
+        indication = (meta.get("indication") or "").strip()
+        if indication:
+            ctx_parts.append(f"Indication: {indication}")
+        comparison = (meta.get("comparison") or "").strip()
+        if comparison and comparison not in ("___", "___."):
+            ctx_parts.append(f"Comparison: {comparison}")
+        if ctx_parts:
+            clinical_context = "\n".join(ctx_parts)
+
+        # Lateral view
+        lateral_image_path = study.get("lateral_image_path") or ""
 
         run["message"] = "Agent running (guided)..." if guided else "Agent running..."
         t0 = time.time()
@@ -162,6 +189,8 @@ def _run_agent_background(run_id: str, study: dict, guided: bool = False):
             image_id=study["study_id"],
             prior_report=prior_report,
             prior_image_path=prior_image_path,
+            clinical_context=clinical_context,
+            lateral_image_path=lateral_image_path,
         )
         agent._react_loop = original_react_loop
         agent.max_iterations = original_max_iters
@@ -215,10 +244,19 @@ def _run_agent_background(run_id: str, study: dict, guided: bool = False):
         else:
             run["status"] = "complete"
             run["message"] = "Done"
+
+        # Strip GROUNDINGS section from report for clean display
+        raw_report = trajectory.final_report or ""
+        try:
+            from scripts.eval_mimic import strip_groundings
+            clean_report, _ = strip_groundings(raw_report)
+        except Exception:
+            clean_report = raw_report
+
         run["result"] = {
             "study_id": study["study_id"],
-            "report_pred": trajectory.final_report or "",
-            "report_pred_raw": trajectory.final_report or "",
+            "report_pred": clean_report,
+            "report_pred_raw": raw_report,
             "num_steps": len(trajectory.steps),
             "wall_time_ms": wall_time,
             "input_tokens": trajectory.total_input_tokens,
@@ -365,7 +403,7 @@ async def start_run(req: RunRequest):
     if not study:
         raise HTTPException(404, f"Study not found: {req.study_id}")
 
-    if req.mode not in ("agent", "agent_guided", "chexagent2", "chexone", "medgemma", "medversa"):
+    if req.mode not in ("agent", "agent_guided", "chexagent2", "chexone", "medgemma"):
         raise HTTPException(400, f"Invalid mode: {req.mode}")
 
     run_id = str(uuid.uuid4())[:8]

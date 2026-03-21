@@ -12,12 +12,21 @@ function cleanFeedback(raw: string): string {
   return text.trim();
 }
 
+interface FeatureContext {
+  hasMetadata: boolean;
+  hasPrior: boolean;
+  hasLateral: boolean;
+}
+
 interface WorkflowPanelProps {
   trajectories: Record<string, Trajectory>;
+  featureContext?: FeatureContext;
+  lateralImagePath?: string;
 }
 
 // Color by tool type
 function toolColor(name: string): string {
+  if (name.includes("temporal") || name.includes("longitudinal")) return "text-violet-400";
   if (name.includes("report") || name.includes("srrg")) return "text-blue-400";
   if (name.includes("classify")) return "text-purple-400";
   if (name.includes("vqa")) return "text-cyan-400";
@@ -28,13 +37,14 @@ function toolColor(name: string): string {
 }
 
 function toolIcon(name: string): string {
+  if (name.includes("temporal") || name.includes("longitudinal")) return "T";
   if (name.includes("report") || name.includes("srrg")) return "R";
   if (name.includes("classify")) return "C";
   if (name.includes("vqa")) return "Q";
   if (name.includes("grounding")) return "G";
   if (name.includes("segment")) return "S";
   if (name.includes("verify") || name.includes("fact")) return "V";
-  return "T";
+  return "?";
 }
 
 /**
@@ -127,6 +137,24 @@ function StepCard({
   );
 }
 
+function FeatureBanner({ color, label }: { color: string; label: string }) {
+  return (
+    <div className={`flex items-center gap-2 mx-1 my-1.5 px-2.5 py-1 rounded border-l-2 ${color}`}>
+      <span className="text-[10px] font-medium">{label}</span>
+    </div>
+  );
+}
+
+/** Inline marker after specific tool calls */
+function InlineMarker({ label, color }: { label: string; color: string }) {
+  return (
+    <div className={`flex items-center gap-1.5 mx-3 my-0.5 text-[10px] ${color}`}>
+      <span className="w-1 h-1 rounded-full bg-current" />
+      <span className="font-medium">{label}</span>
+    </div>
+  );
+}
+
 function StepList({
   steps,
   feedbackIdx,
@@ -134,6 +162,8 @@ function StepList({
   expandedSteps,
   toggleStep,
   isLive,
+  featureContext,
+  lateralImagePath,
 }: {
   steps: TrajectoryStep[];
   feedbackIdx: number;
@@ -141,6 +171,8 @@ function StepList({
   expandedSteps: Set<number>;
   toggleStep: (i: number) => void;
   isLive: boolean;
+  featureContext?: FeatureContext;
+  lateralImagePath?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef(0);
@@ -155,6 +187,17 @@ function StepList({
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto px-2 py-2">
+      {/* Top-of-list feature banners */}
+      {featureContext?.hasMetadata && (
+        <FeatureBanner color="border-accent bg-accent/8 text-accent" label="Clinical context provided" />
+      )}
+      {featureContext?.hasPrior && (
+        <FeatureBanner color="border-violet-400 bg-violet-400/8 text-violet-400" label="Prior study comparison active" />
+      )}
+      {featureContext?.hasLateral && (
+        <FeatureBanner color="border-teal-400 bg-teal-400/8 text-teal-400" label="Lateral view provided" />
+      )}
+
       {steps.map((step, i) => (
         <div key={i} className={isLive && i >= prevCount.current - 1 ? "animate-step-pop-in" : ""}>
           {i === feedbackIdx && feedback && (
@@ -166,6 +209,20 @@ function StepList({
             onToggle={() => toggleStep(i)}
             isPostFeedback={feedbackIdx >= 0 && i >= feedbackIdx}
           />
+          {/* Inline markers after specific tool calls */}
+          {(step.tool_name.includes("temporal") || step.tool_name.includes("longitudinal")) && (
+            <InlineMarker label="Temporal comparison triggered" color="text-violet-400" />
+          )}
+          {step.tool_name.includes("grounding") && (
+            <InlineMarker label="Grounding generated" color="text-yellow-400" />
+          )}
+          {lateralImagePath && (
+            JSON.stringify(step.tool_input || {}).includes("lateral") ||
+            JSON.stringify(step.tool_input || {}).includes(lateralImagePath) ||
+            (step.tool_output || "").toLowerCase().includes("lateral")
+          ) && (
+            <InlineMarker label="Lateral view analyzed" color="text-teal-400" />
+          )}
         </div>
       ))}
       {isLive && (
@@ -178,7 +235,7 @@ function StepList({
   );
 }
 
-export default function WorkflowPanel({ trajectories }: WorkflowPanelProps) {
+export default function WorkflowPanel({ trajectories, featureContext, lateralImagePath }: WorkflowPanelProps) {
   const { selectedModel, expandedSteps, toggleStep, liveRuns } = useStudyStore();
 
   // Pick trajectory: live run trajectory first, then pre-computed
@@ -266,6 +323,8 @@ export default function WorkflowPanel({ trajectories }: WorkflowPanelProps) {
         expandedSteps={expandedSteps}
         toggleStep={toggleStep}
         isLive={isLive}
+        featureContext={featureContext}
+        lateralImagePath={lateralImagePath}
       />
 
       {/* Legend */}
@@ -273,6 +332,7 @@ export default function WorkflowPanel({ trajectories }: WorkflowPanelProps) {
         <span className="text-blue-400">R Report</span>
         <span className="text-purple-400">C Classify</span>
         <span className="text-cyan-400">Q VQA</span>
+        <span className="text-violet-400">T Temporal</span>
         <span className="text-yellow-400">G Ground</span>
         <span className="text-green-400">S Segment</span>
         <span className="text-red-400">V Verify</span>

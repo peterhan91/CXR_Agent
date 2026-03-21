@@ -72,6 +72,7 @@ export interface TestStudy {
   study_id: string;
   dataset: string;
   image_path: string;
+  lateral_image_path?: string;
   report_gt: string;
   findings: string;
   impression: string;
@@ -82,7 +83,18 @@ export interface TestStudy {
     view_position?: string;
     chexpert_labels?: Record<string, string>;
     study_date?: string;
-    admission_info?: Record<string, unknown>;
+    age?: number;
+    sex?: string;
+    indication?: string;
+    comparison?: string;
+    admission_info?: {
+      demographics?: { age?: number; gender?: string };
+      chief_complaint?: string;
+      patient_history?: string;
+      admission_type?: string;
+      icd_diagnoses?: Array<{ code: string; description: string }>;
+      [key: string]: unknown;
+    };
   };
 }
 

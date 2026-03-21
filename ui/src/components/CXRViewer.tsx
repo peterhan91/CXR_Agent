@@ -1,32 +1,64 @@
 "use client";
 
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useMemo } from "react";
 import { imageUrl } from "@/lib/api";
 import { useStudyStore } from "@/stores/studyStore";
 
 interface CXRViewerProps {
   imagePath: string;
   priorImagePath?: string;
+  priorStudyDate?: string;
+  lateralImagePath?: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export default function CXRViewer({ imagePath, priorImagePath }: CXRViewerProps) {
+export default function CXRViewer({
+  imagePath,
+  priorImagePath,
+  priorStudyDate,
+  lateralImagePath,
+}: CXRViewerProps) {
   const {
     brightness,
     contrast,
     zoom,
     panX,
     panY,
+    activeImageTab,
     setBrightness,
     setContrast,
     setZoom,
     setPan,
     resetView,
+    setActiveImageTab,
   } = useStudyStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
+
+  // Build available tabs
+  const tabs = useMemo(() => {
+    const t: Array<{ key: "current" | "prior" | "lateral"; label: string }> = [
+      { key: "current", label: "Current" },
+    ];
+    if (priorImagePath) {
+      const dateLabel = priorStudyDate ? ` (${priorStudyDate})` : "";
+      t.push({ key: "prior", label: `Prior${dateLabel}` });
+    }
+    if (lateralImagePath) {
+      t.push({ key: "lateral", label: "Lateral" });
+    }
+    return t;
+  }, [priorImagePath, priorStudyDate, lateralImagePath]);
+
+  const hasTabs = tabs.length > 1;
+
+  // Resolve which image to display
+  const displayPath = useMemo(() => {
+    if (activeImageTab === "prior" && priorImagePath) return priorImagePath;
+    if (activeImageTab === "lateral" && lateralImagePath) return lateralImagePath;
+    return imagePath;
+  }, [activeImageTab, imagePath, priorImagePath, lateralImagePath]);
 
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -59,6 +91,28 @@ export default function CXRViewer({ imagePath, priorImagePath }: CXRViewerProps)
 
   return (
     <div className="flex flex-col h-full">
+      {/* Image tab bar — only shown when multiple views available */}
+      {hasTabs && (
+        <div className="bg-bg-surface border-b border-separator px-3 flex items-center gap-0">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                setActiveImageTab(tab.key);
+                resetView();
+              }}
+              className={`px-3 py-1.5 text-xs font-medium transition-colors border-b-2 ${
+                activeImageTab === tab.key
+                  ? "text-text-primary border-text-primary"
+                  : "text-text-tertiary border-transparent hover:text-text-secondary"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Image viewport */}
       <div
         ref={containerRef}
@@ -70,7 +124,7 @@ export default function CXRViewer({ imagePath, priorImagePath }: CXRViewerProps)
         onMouseLeave={handleMouseUp}
       >
         <img
-          src={imageUrl(imagePath)}
+          src={imageUrl(displayPath)}
           alt="CXR"
           className="absolute top-1/2 left-1/2 max-w-none select-none"
           draggable={false}
