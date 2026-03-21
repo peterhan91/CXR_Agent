@@ -1,0 +1,115 @@
+# Combo Baseline: feat5_metadata + feat1b_grounding_replace
+# Always-on features: clinical metadata + MedGemma grounding (replaces CA2 grounding)
+# No temporal or multiview tools.
+
+# Feature flags — gate what context is passed to the agent
+features:
+  prior: false
+  metadata: true     # combo baseline includes metadata
+  lateral: false
+
+agent:
+  model: "claude-sonnet-4-6"
+  prompt_mode: "initial"
+  max_iterations: 10
+  max_tokens: 4096
+  temperature: 0.0
+
+clear:
+  enabled: false
+  model_path: "../cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt"
+  concepts_path: "../cxr_concept/CheXzero/concepts/mimic_concepts.csv"
+  dinov2_model_name: "dinov2_vitb14"
+  image_resolution: 448
+  top_k: 20
+
+tools:
+  # Report generators (3)
+  chexagent2:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexagent2_srrg:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexone:
+    enabled: true
+    endpoint: "http://localhost:8002"
+
+  # MedGemma VQA
+  medgemma_vqa:
+    enabled: true
+    endpoint: "http://localhost:8010"
+  medgemma_report:
+    enabled: false
+    endpoint: "http://localhost:8010"
+
+  # Classification
+  chexagent2_classify:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexzero:
+    enabled: false
+    endpoint: "http://localhost:8009"
+  cxr_foundation:
+    enabled: false
+    endpoint: "http://localhost:8008"
+
+  # Grounding — MedGemma replaces CheXagent-2 (feat1b)
+  chexagent2_grounding:
+    enabled: false
+    endpoint: "http://localhost:8001"
+  medgemma_grounding:
+    enabled: true
+    endpoint: "http://localhost:8010"
+
+  # VQA
+  chexagent2_vqa:
+    enabled: true
+    endpoint: "http://localhost:8001"
+
+  # MedVersa — disabled
+  medversa:
+    enabled: false
+    endpoint: "http://localhost:8004"
+  medversa_classify:
+    enabled: false
+    endpoint: "http://localhost:8004"
+  medversa_detect:
+    enabled: false
+    endpoint: "http://localhost:8004"
+  medversa_segment:
+    enabled: false
+    endpoint: "http://localhost:8004"
+  medversa_vqa:
+    enabled: false
+    endpoint: "http://localhost:8004"
+
+  # Segmentation
+  biomedparse:
+    enabled: true
+    endpoint: "http://localhost:8005"
+  medsam:
+    enabled: false
+    endpoint: "http://localhost:8009"
+  medsam3:
+    enabled: false
+    endpoint: "http://localhost:8006"
+
+  # Verification
+  factchexcker:
+    enabled: true
+    endpoint: "http://localhost:8007"
+
+  # Temporal — disabled in baseline
+  chexagent2_temporal:
+    enabled: false
+    endpoint: "http://localhost:8001"
+
+skill:
+  enabled: false
+  path: null
+
+logging:
+  level: "INFO"
+  save_trajectories: true
+  trajectory_dir: "trajectories/"

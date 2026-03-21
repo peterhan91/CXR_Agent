@@ -1,0 +1,109 @@
+# CXR Agent Configuration — Feature 5: Clinical Metadata
+# Same tools as baseline (config_initial.yaml). The feature is activated by
+# code changes in _build_initial_message() and eval_mimic.py that pass
+# age/sex/indication/comparison to the agent in initial mode.
+
+# Feature flags — gate what context is passed to the agent
+features:
+  prior: false
+  metadata: true     # clinical metadata — age/sex/indication
+  lateral: false
+
+agent:
+  model: "claude-sonnet-4-6"
+  prompt_mode: "initial"
+  max_iterations: 10
+  max_tokens: 4096
+  temperature: 0.0
+  # No reasoning_effort in initial mode (original had none)
+
+clear:
+  enabled: false
+  model_path: "../cxr_concept/CheXzero/checkpoints/dinov2-multi-v1.0_vitb/best_model.pt"
+  concepts_path: "../cxr_concept/CheXzero/concepts/mimic_concepts.csv"
+  dinov2_model_name: "dinov2_vitb14"
+  image_resolution: 448
+  top_k: 20
+
+tools:
+  # Report generators (3)
+  chexagent2:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexagent2_srrg:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexone:
+    enabled: true
+    endpoint: "http://localhost:8002"
+
+  # MedGemma VQA — enabled as 3rd independent model for tie-breaking
+  medgemma_vqa:
+    enabled: true
+    endpoint: "http://localhost:8010"
+  medgemma_report:
+    enabled: false
+    endpoint: "http://localhost:8010"
+
+  # Classification (2 — no chexzero/cxr_foundation in initial)
+  chexagent2_classify:
+    enabled: true
+    endpoint: "http://localhost:8001"
+  chexzero:
+    enabled: false
+    endpoint: "http://localhost:8009"
+  cxr_foundation:
+    enabled: false
+    endpoint: "http://localhost:8008"
+
+  # Grounding
+  chexagent2_grounding:
+    enabled: true
+    endpoint: "http://localhost:8001"
+
+  # VQA
+  chexagent2_vqa:
+    enabled: true
+    endpoint: "http://localhost:8001"
+
+  # MedVersa — disabled for A/B testing (servers not running)
+  medversa:
+    enabled: false
+    endpoint: "http://localhost:8004"
+  medversa_classify:
+    enabled: false
+    endpoint: "http://localhost:8004"
+  medversa_detect:
+    enabled: false
+    endpoint: "http://localhost:8004"
+  medversa_segment:
+    enabled: false
+    endpoint: "http://localhost:8004"
+  medversa_vqa:
+    enabled: false
+    endpoint: "http://localhost:8004"
+
+  # Segmentation
+  biomedparse:
+    enabled: true
+    endpoint: "http://localhost:8005"
+  medsam:
+    enabled: false
+    endpoint: "http://localhost:8009"
+  medsam3:
+    enabled: false
+    endpoint: "http://localhost:8006"
+
+  # Verification
+  factchexcker:
+    enabled: true
+    endpoint: "http://localhost:8007"
+
+skill:
+  enabled: false
+  path: null
+
+logging:
+  level: "INFO"
+  save_trajectories: true
+  trajectory_dir: "trajectories/"
