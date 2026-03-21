@@ -18,8 +18,15 @@ export default function MetadataBar({ study }: MetadataBarProps) {
   const sex =
     meta.sex ?? meta.admission_info?.demographics?.gender;
   const indication = (meta.indication || "").trim();
-  const comparison = (meta.comparison || "").trim();
+  const rawComparison = (meta.comparison || "").trim();
   const viewPos = meta.view_position;
+
+  // When a linked prior exists, show its actual study date instead of the
+  // raw Comparison text (which may have inconsistent de-identified dates).
+  const priorDate = study.prior_study?.study_date;
+  const comparison = priorDate
+    ? `${priorDate.slice(0, 4)}-${priorDate.slice(4, 6)}-${priorDate.slice(6, 8)}`
+    : rawComparison;
 
   // Don't render if nothing to show
   const hasDemographics = age != null || sex;

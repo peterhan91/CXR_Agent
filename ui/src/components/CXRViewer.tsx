@@ -42,7 +42,10 @@ export default function CXRViewer({
       { key: "current", label: "Current" },
     ];
     if (priorImagePath) {
-      const dateLabel = priorStudyDate ? ` (${priorStudyDate})` : "";
+      const formattedDate = priorStudyDate
+        ? `${priorStudyDate.slice(0, 4)}-${priorStudyDate.slice(4, 6)}-${priorStudyDate.slice(6, 8)}`
+        : "";
+      const dateLabel = formattedDate ? ` (${formattedDate})` : "";
       t.push({ key: "prior", label: `Prior${dateLabel}` });
     }
     if (lateralImagePath) {
