@@ -66,19 +66,22 @@ export OPENAI_API_KEY="sk-..."
 # Install huggingface-cli if needed
 pip install huggingface_hub
 
-# Download the dataset (12.3 GB — eval JSONs with relative paths + 13,909 CXR images)
+# Download the dataset tar (13 GB — eval JSONs + 13,909 CXR images)
 huggingface-cli download peterhan91/CXR_Agent_Data \
+    cxr_agent_dataset.tar \
     --repo-type dataset \
-    --local-dir data/cxr_agent_dataset
+    --local-dir data/
 
-# The eval JSONs use relative paths like "images/mimic/p12/p12810135/s50981777/xxx.jpg"
-# The gateway needs these to be absolute. We generate a symlink layout:
+# Extract
+tar xf data/cxr_agent_dataset.tar -C data/
+
+# Rewrite relative image paths to absolute paths for this machine
 python scripts/setup_data.py
 ```
 
-> `scripts/setup_data.py` is created in Step 7 below. It copies eval JSONs from the
-> downloaded dataset into `data/eval/`, rewriting relative image paths to absolute paths
-> under `data/cxr_agent_dataset/`.
+> `scripts/setup_data.py` copies eval JSONs from the extracted dataset into `data/eval/`,
+> rewriting relative image paths (e.g. `images/mimic/...`) to absolute paths under
+> `data/cxr_agent_dataset/`.
 
 ## Step 3: Create conda environments
 
